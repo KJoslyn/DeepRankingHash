@@ -36,7 +36,7 @@ X = 2 -- Table index for text modality
 filePath = '/home/kjoslyn/kevin/' -- server
 
 require 'pickSubset'
-require 'aux'
+require 'auxFunctions'
 require 'createModel'
 
 trainset = {}
@@ -68,6 +68,10 @@ end
 -- TODO: Make these return something instead of global variables?
 getImageData()
 getTextData()
+
+calcMAP(X, I) -- TODO: Remove
+
+--[[
 
 criterion = getCriterion()
 
@@ -121,8 +125,6 @@ end
 totalLoss = 0
 -- epochHistorySize = 5
 -- epochHistoryLoss = torch.Tensor(epochHistorySize):fill(0)
-
-calcMAP_I_to_T() -- TODO: Remove
 
 --[[
 for epoch = 0, numEpochs - 1 do

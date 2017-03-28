@@ -67,7 +67,7 @@ function getBatch(batchNum, epoch_pos_perm, epoch_neg_perm)
 end
 
 
-function getHashCodes(hasherInput, modality)
+function doGetHashCodes(hasherInput, modality)
 
     if modality == I then
         pred = imageModel:forward(hasherInput[modality]:cuda())
@@ -100,24 +100,52 @@ function printStats(trainBatch, similarity_target)
     -- print("Accuracy: " .. accuracy * 100)
 end
 
-function calcMAP_I_to_T()
+function getHashCodes(data, modality)
+
+    if modality == X then
+        return doGetHashCodes(data, modality)
+    elseif modality == I then
+        N = data[I]:size(1)
+        if N < 1000 then
+            return doGetHashCodes(data, I)
+        else
+            local batchSize = 128
+            hashCodes = torch.CudaLongTensor(N, L, 1)
+            local numBatches = torch.ceil(N / batchSize)
+            for b = 0, numBatches - 1 do
+                startIndex = b * batchSize + 1
+                endIndex = math.min((b + 1) * batchSize, N)
+                batch = {}
+                batch[I] = data[I][{{ startIndex, endIndex }}]
+                hashCodes[{{ startIndex, endIndex}}] = doGetHashCodes(batch, I)
+            end
+            return hashCodes    
+        end
+    else
+        print("Error: unrecognized modality")
+    end
+end
+
+function calcMAP(fromModality, toModality)
 
     K = 50
 
-    queryCodes = getHashCodes(testset, I)
+    queryCodes = getHashCodes(testset, fromModality)
+    databaseCodes = getHashCodes(trainset, toModality) -- Currently the database is only the trainset
 
-    database = {}
-    database[X] = trainset[X]
-    -- database[X] = torch.cat({trainset[X], testset[X]}, 1) -- Currently not including test set in database
-    databaseSize = database[X]:size(1)
-
-    databaseCodes = getHashCodes(database, X)
+    if fromModality == I then
+        queryLabels = test_labels_image:float()
+        databaseLabels = train_labels_text:float()
+    else
+        queryLabels = test_labels_text:float()
+        databaseLabels = train_labels_image:float()
+    end
 
     -- Q = 1
     Q = queryCodes:size(1)
     sumAPs = 0
     for q = 1,Q do
-        query = torch.repeatTensor(queryCodes[q], databaseSize, 1, 1)
+        query = torch.repeatTensor(queryCodes[q], databaseCodes:size(1), 1, 1)
         ne = torch.ne(query, databaseCodes):sum(2)
         ne = torch.reshape(ne, ne:size(1))
         res, ind = torch.Tensor(ne:size(1)):copy(ne):topk(K)
@@ -125,21 +153,23 @@ function calcMAP_I_to_T()
         res2, ind2 = torch.sort(res)
         topkIndices = ind:index(1,ind2)
 
-        imageLabel = test_labels_image[q]
+        qLabel = queryLabels[q]
 
         AP = 0
         correct = 0
         for k = 1,K do
 
-            textLabel = train_labels_text[topkIndices[k]]:float()
-            dotProd = torch.dot(imageLabel, textLabel)
+            kLabel = databaseLabels[topkIndices[k]]
+            dotProd = torch.dot(qLabel, kLabel)
             if dotProd > 0 then
                 correct = correct + 1
-                AP = AP + (correct / k)
+                AP = AP + (correct / k) -- add precision component
             end
         end
-        AP = AP / K
+        AP = AP / K -- Recall component: same as multiplying each precision component by 1/K. This assumes >= K instances are similar
         sumAPs = sumAPs + AP
     end
     mAP = sumAPs / Q
+
+    return mAP
 end
