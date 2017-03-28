@@ -1,0 +1,188 @@
+require 'nn'
+require 'loadcaffe' -- doesn't work on server
+require 'image'
+require 'optim'
+require 'nnlr'
+require 'cutorch'
+require 'cunn'
+require 'cudnn'
+
+-- Variable Parameters
+numEpochs = 400 -- 416 is max number without truncating an epoch
+posExamplesPerEpoch = 1e4
+negExamplesPerEpoch = 5e4
+L = 8
+k = 4
+hashLayerSize = L * k
+local baseLearningRate = 1e-6
+local baseWeightDecay = 0
+lrMultForHashLayer = 1e4 -- 1e4, 1e5, etc
+posExamplesPerBatch = 20
+negExamplesPerBatch = 100
+
+-- These are inferred from above
+epochSize = posExamplesPerEpoch + negExamplesPerEpoch
+totNumExamplesPerBatch = posExamplesPerBatch + negExamplesPerBatch
+numBatches = epochSize / totNumExamplesPerBatch
+
+-- Variable Boolean Parameters (1 or 0)
+trainOnOneBatch   = 0
+loadModelFromFile = 0
+saveModelToFile   = 0
+
+-- Fixed Parameters
+I = 1 -- Table index for image modality
+X = 2 -- Table index for text modality
+filePath = '/home/kjoslyn/kevin/' -- server
+
+require 'pickSubset'
+require 'aux'
+require 'createModel'
+
+trainset = {}
+testset = {}
+
+if loadModelFromFile == 1 then
+    print('***Loading model from file')
+    modelData = torch.load('modelData.t7')
+    imageModel = modelData.imageModel
+    textModel = modelData.textModel
+    model = modelData.combinedModel
+else
+    imageModel = getImageModel()
+    textModel = getTextModel()
+    model = createCombinedModel(imageModel, textModel)
+
+    if saveModelToFile == 1 then
+      print('***Saving model to file')
+      modelData = {}
+      modelData.imageModel = imageModel
+      modelData.textModel = textModel
+      modelData.combinedModel = model
+      torch.save('modelData.t7', modelData)
+    else
+      print('***Skipping save model to file')
+    end
+end
+
+-- TODO: Make these return something instead of global variables?
+getImageData()
+getTextData()
+
+criterion = getCriterion()
+
+learningRates, weightDecays = model:getOptimConfig(baseLearningRate, baseWeightDecay)
+
+local optimState = {
+      learningRate = baseLearningRate,
+      learningRates = learningRates,
+      weightDecays = weightDecays
+      -- learningRateDecay = 1e-7
+      -- learningRate = 1e-3,
+      -- learningRateDecay = 1e-4
+      -- weightDecay = 0.01,
+      -- momentum = 0.9
+}
+
+params, gradParams = model:getParameters()
+
+model:training()
+
+pos_pairs, neg_pars, p_size, n_size = pickSubset(true)
+
+-- This permutation will be used for all of training. Examples will not be repeated
+pos_perm = torch.randperm(p_size):long()
+neg_perm = torch.randperm(n_size):long()
+
+-- The label tensor will be the same for each batch
+batch_sim_label = torch.Tensor(posExamplesPerBatch):fill(1)
+batch_sim_label = batch_sim_label:cat(torch.Tensor(negExamplesPerBatch):fill(0))
+batch_sim_label = torch.CudaByteTensor(totNumExamplesPerBatch):copy(batch_sim_label)
+batch_label_for_loss = torch.CudaTensor(totNumExamplesPerBatch):copy(batch_sim_label) * L
+
+-- -- POS ONLY The label tensor will be the same for each batch
+-- batch_sim_label = torch.Tensor(100):fill(1)
+-- batch_sim_label = torch.CudaByteTensor(100):copy(batch_sim_label)
+-- batch_label_for_loss = torch.CudaTensor(100):copy(batch_sim_label) * L
+
+-- -- NEG ONLY The label tensor will be the same for each batch
+-- batch_sim_label = torch.Tensor(100):fill(0)
+-- batch_sim_label = torch.CudaByteTensor(100):copy(batch_sim_label)
+-- batch_label_for_loss = torch.CudaTensor(100):copy(batch_sim_label)
+
+iterationsComplete = 0
+
+if trainOnOneBatch == 1 then
+  print("**************WARNING- Training on one batch only")
+  epoch_pos_perm, epoch_neg_perm = getEpochPerm(0)
+  trainBatch = getBatch(0, epoch_pos_perm, epoch_neg_perm)
+end
+
+totalLoss = 0
+-- epochHistorySize = 5
+-- epochHistoryLoss = torch.Tensor(epochHistorySize):fill(0)
+
+calcMAP_I_to_T() -- TODO: Remove
+
+--[[
+for epoch = 0, numEpochs - 1 do
+
+    if trainOnOneBatch == 0 then
+      epoch_pos_perm, epoch_neg_perm = getEpochPerm(epoch)
+    end
+
+    epochLoss = 0
+
+    for batchNum = 0, numBatches - 1 do
+
+        if trainOnOneBatch == 0 then
+          trainBatch = getBatch(batchNum, epoch_pos_perm, epoch_neg_perm)
+        end
+
+        function feval(x)
+            -- get new parameters
+            if x ~= params then
+               params:copy(x)
+            end         
+
+            input = trainBatch.data
+            target = batch_label_for_loss
+            inputSize = input[1]:size(1)
+
+            gradParams:zero()
+
+            output = model:forward(input)
+            local loss = criterion:forward(output, target)
+            local dloss_doutput = criterion:backward(output, target)
+            model:backward(input, dloss_doutput)
+
+            gradParams:div(inputSize)
+            loss = loss/inputSize
+
+            -- Stats
+            epochLoss = epochLoss + loss
+            -- epochHistoryLoss[(epoch % epochHistorySize) + 1] = loss
+            totalLoss = totalLoss + loss
+
+            return loss, gradParams
+        end
+        optim.sgd(feval, params, optimState)
+
+        iterationsComplete = iterationsComplete + 1
+
+        -- collectgarbage()
+    end
+    -- epochPred = model:forward(trainBatch.data)
+
+    print("=====Epoch " .. epoch)
+    printStats(trainBatch, batch_sim_label) -- TODO: This is not very useful because it is only for the last batch in the epoch
+    print(string.format("Avg Loss this epoch = %.2f", epochLoss / numBatches))
+    -- print(string.format("Avg Loss last %d epochs = %.2f", epochHistorySize, epochHistoryLoss:sum() / epochHistorySize))
+    print(string.format("Avg Loss overall = %.2f", totalLoss / iterationsComplete))
+end
+--]]
+
+
+--[[
+model:evaluate()
+--]]
