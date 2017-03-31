@@ -21,55 +21,61 @@ function getImageModel()
 
     local model = loadcaffe.load(filePath .. 'CNN Model/trainnet.prototxt', filePath .. 'CNN Model/snapshot_iter_16000.caffemodel', 'cudnn')
 
-    -- Remove classification layer and add hash layer
-    model.modules[#model.modules] = nil
-    model:add(nn.Linear(4096, hashLayerSize)
-        :init('weight', nninit.xavier, {dist = 'normal'})
-        :learningRate('weight', lrMultForHashLayer))
-
-    model:add(getSoftMaxLayer())
-
-    return model
+    return createClassifierAndHasher(model, 4096)
 end
 
 function getTextModel()
 
     local model = loadcaffe.load(filePath .. 'text model/tag_trainnet.prototxt', filePath .. 'text model/snapshot_iter_200.caffemodel', 'cudnn')
 
-    -- Remove first layer
+    -- Remove first layer that comes from caffemodel
     model.modules[1] = nil
     for i = 1,#model.modules-1 do
         model.modules[i] = model.modules[i+1]
     end
     model.modules[#model.modules] = nil
 
-    -- Remove classification layer and add hash layer
-    model.modules[#model.modules] = nil
-
-    -- State of Text Model at this point
-    -- nn.Linear(1075, 1075)
-    -- cudnn.ReLU(true))
-    -- nn.Dropout(0.500000)
-    -- nn.Linear(1075, 2048)
-    -- cudnn.ReLU(true)
-    -- nn.Dropout(0.500000)
-
-    model:add(nn.Linear(2048, hashLayerSize)
-        :init('weight', nninit.xavier, {dist = 'normal'})
-        :learningRate('weight', lrMultForHashLayer))
-
-    model:add(getSoftMaxLayer())
-
-    return model
+    return createClassifierAndHasher(model, 2048)
 end
 
-function createCombinedModel(imageModel, textModel)
+function createClassifierAndHasher(model, prevLayerSize)
+
+    -- Grab classification layer and remove it
+    local classLayer = nn.Sequential()
+    classLayer:add(model.modules[#model.modules])
+    classLayer:add(nn.Sigmoid())
+    model.modules[#model.modules] = nil
+
+    local hashLayer = nn.Sequential()
+    hashLayer:add(nn.Linear(prevLayerSize, hashLayerSize)
+        :init('weight', nninit.xavier, {dist = 'normal'})
+        :learningRate('weight', lrMultForHashLayer))
+    hashLayer:add(getSoftMaxLayer())
+
+    local concat = nn.ConcatTable()
+    concat:add(classLayer)
+    concat:add(hashLayer)
+
+    model:add(concat)
+
+    local classifier = nn.Sequential()
+    classifier:add(model)
+    classifier:add(nn.SelectTable(1))
+
+    local hasher = nn.Sequential()
+    hasher:add(model)
+    hasher:add(nn.SelectTable(2))
+
+    return classifier, hasher
+end
+
+function createCombinedModel(imageHasher, textHasher)
 
     local model = nn.Sequential()
 
     cnn_text = nn.ParallelTable()
-    cnn_text:add(imageModel)
-    cnn_text:add(textModel)
+    cnn_text:add(imageHasher)
+    cnn_text:add(textHasher)
 
     model:add(cnn_text)
     model:add(nn.DotProduct())
@@ -78,7 +84,6 @@ function createCombinedModel(imageModel, textModel)
 
     return model
 end
-
 
 function getCriterion()
 

@@ -63,16 +63,16 @@ function getBatch(batchNum, epoch_pos_perm, epoch_neg_perm)
         return self.data[1]:size(1) 
     end
 
-    return batch
+    return batch, batchIdx
 end
 
 
 function doGetHashCodes(hasherInput, modality)
 
     if modality == I then
-        pred = imageModel:forward(hasherInput[modality]:cuda())
+        pred = imageHasher:forward(hasherInput[modality]:cuda())
     else
-        pred = textModel:forward(hasherInput[modality]:cuda())
+        pred = textHasher:forward(hasherInput[modality]:cuda())
     end
 
     reshapedInput = nn.Reshape(L,k):cuda():forward(pred)
@@ -126,19 +126,25 @@ function getHashCodes(data, modality)
     end
 end
 
-function calcMAP(fromModality, toModality)
+function calcMAP(fromModality, toModality, trainBatch, batchIdx) -- TODO: Remove 3rd parameter
 
     K = 50
 
-    queryCodes = getHashCodes(testset, fromModality)
-    databaseCodes = getHashCodes(trainset, toModality) -- Currently the database is only the trainset
+    -- queryCodes = getHashCodes(testset, fromModality)
+    queryCodes = getHashCodes(trainBatch, fromModality) -- TODO: Switch back!!
+    -- databaseCodes = getHashCodes(trainset, toModality) -- Currently the database is only the trainset
+    databaseCodes = getHashCodes(trainBatch, toModality) -- TODO: Switch back!!!
 
     if fromModality == I then
-        queryLabels = test_labels_image:float()
-        databaseLabels = train_labels_text:float()
+        -- queryLabels = test_labels_image:float()
+        -- databaseLabels = train_labels_text:float()
+        queryLabels = train_labels_image:float():index(1, batch_idx:select(2,1):long())
+        databaseLabels = train_labels_text:float():index(1, batch_idx:select(2,2):long())
     else
-        queryLabels = test_labels_text:float()
-        databaseLabels = train_labels_image:float()
+        -- queryLabels = test_labels_text:float()
+        -- databaseLabels = train_labels_image:float()
+        queryLabels = train_labels_text:float():index(1, batch_idx:select(2,1):long())
+        databaseLabels = train_labels_image:float():index(1, batch_idx:select(2,2):long())
     end
 
     -- Q = 1
@@ -155,6 +161,22 @@ function calcMAP(fromModality, toModality)
 
         qLabel = queryLabels[q]
 
+        if trainOnOneBatch then
+            -- TODO: This is for testing only
+            numSimilar = 0
+            D = databaseLabels:size(1)
+            for d = 1,D do
+                dLabel = databaseLabels[d]
+                dotPod = torch.dot(qLabel, dLabel)
+                if dotPod > 0 then
+                    numSimilar = numSimilar + 1
+                end
+            end
+            numSimilar = math.min(numSimilar, K)
+        else
+            numSimilar = K
+        end
+
         AP = 0
         correct = 0
         for k = 1,K do
@@ -166,10 +188,21 @@ function calcMAP(fromModality, toModality)
                 AP = AP + (correct / k) -- add precision component
             end
         end
-        AP = AP / K -- Recall component: same as multiplying each precision component by 1/K. This assumes >= K instances are similar
+        AP = AP / numSimilar -- Recall component: same as multiplying each precision component by 1/K. This assumes >= K instances are similar
         sumAPs = sumAPs + AP
     end
     mAP = sumAPs / Q
 
     return mAP
+end
+
+function calcClassAccuracy()
+
+    dotProd = torch.CudaTensor(numInstances)
+    for i = 1, numInstances do
+        dotProd[i] = torch.dot(roundedOutput[i], target[i])
+    end
+    zero = torch.zeros(numInstances):cuda()
+    numCorrect = dotProd:gt(zero):sum()
+    accuracy = numCorrect * 100 / numInstances
 end

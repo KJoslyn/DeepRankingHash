@@ -9,14 +9,16 @@ require 'cudnn'
 
 -- Variable Parameters
 numEpochs = 400 -- 416 is max number without truncating an epoch
-posExamplesPerEpoch = 1e4
-negExamplesPerEpoch = 5e4
+-- posExamplesPerEpoch = 1e4
+-- negExamplesPerEpoch = 5e4
+posExamplesPerEpoch = 20*100
+negExamplesPerEpoch = 100*100
 L = 8
 k = 4
 hashLayerSize = L * k
 local baseLearningRate = 1e-6
 local baseWeightDecay = 0
-lrMultForHashLayer = 1e4 -- 1e4, 1e5, etc
+lrMultForHashLayer = 1e5 -- 1e4, 1e5, etc
 posExamplesPerBatch = 20
 negExamplesPerBatch = 100
 
@@ -26,7 +28,7 @@ totNumExamplesPerBatch = posExamplesPerBatch + negExamplesPerBatch
 numBatches = epochSize / totNumExamplesPerBatch
 
 -- Variable Boolean Parameters (1 or 0)
-trainOnOneBatch   = 0
+trainOnOneBatch   = 1
 loadModelFromFile = 0
 saveModelToFile   = 0
 
@@ -45,19 +47,23 @@ testset = {}
 if loadModelFromFile == 1 then
     print('***Loading model from file')
     modelData = torch.load('modelData.t7')
-    imageModel = modelData.imageModel
-    textModel = modelData.textModel
+    imageClassifier = modelData.imageClassifier
+    imageHasher = modelData.imageHasher
+    textClassifier = modelData.textClassifier
+    textHasher = modelData.textHasher
     model = modelData.combinedModel
 else
-    imageModel = getImageModel()
-    textModel = getTextModel()
-    model = createCombinedModel(imageModel, textModel)
+    imageClassifier, imageHasher = getImageModel()
+    textClassifier, textHasher = getTextModel()
+    model = createCombinedModel(imageHasher, textHasher)
 
     if saveModelToFile == 1 then
       print('***Saving model to file')
       modelData = {}
-      modelData.imageModel = imageModel
-      modelData.textModel = textModel
+      modelData.imageClassifier = imageClassifier
+      modelData.imageHasher = imageHasher
+      modelData.textClassifier = textClassifier
+      modelData.textHasher = textHasher
       modelData.combinedModel = model
       torch.save('modelData.t7', modelData)
     else
@@ -69,9 +75,7 @@ end
 getImageData()
 getTextData()
 
-calcMAP(X, I) -- TODO: Remove
-
---[[
+-- calcMAP(X, I) -- TODO: Remove
 
 criterion = getCriterion()
 
@@ -116,17 +120,18 @@ batch_label_for_loss = torch.CudaTensor(totNumExamplesPerBatch):copy(batch_sim_l
 
 iterationsComplete = 0
 
+trainBatch = {}
+
 if trainOnOneBatch == 1 then
   print("**************WARNING- Training on one batch only")
   epoch_pos_perm, epoch_neg_perm = getEpochPerm(0)
-  trainBatch = getBatch(0, epoch_pos_perm, epoch_neg_perm)
+  trainBatch, batchIdx = getBatch(0, epoch_pos_perm, epoch_neg_perm)
 end
 
 totalLoss = 0
 -- epochHistorySize = 5
 -- epochHistoryLoss = torch.Tensor(epochHistorySize):fill(0)
 
---[[
 for epoch = 0, numEpochs - 1 do
 
     if trainOnOneBatch == 0 then
@@ -138,7 +143,7 @@ for epoch = 0, numEpochs - 1 do
     for batchNum = 0, numBatches - 1 do
 
         if trainOnOneBatch == 0 then
-          trainBatch = getBatch(batchNum, epoch_pos_perm, epoch_neg_perm)
+          trainBatch, batchIdx = getBatch(batchNum, epoch_pos_perm, epoch_neg_perm)
         end
 
         function feval(x)
@@ -181,8 +186,15 @@ for epoch = 0, numEpochs - 1 do
     print(string.format("Avg Loss this epoch = %.2f", epochLoss / numBatches))
     -- print(string.format("Avg Loss last %d epochs = %.2f", epochHistorySize, epochHistoryLoss:sum() / epochHistorySize))
     print(string.format("Avg Loss overall = %.2f", totalLoss / iterationsComplete))
+
+    print("size of trainBatch")
+    print(trainBatch.data[1]:size(1))
+
+    textToImageMAP = calcMAP(X, I, trainBatch.data, batchIdx) -- TODO: Remove trainBatch from both
+    imageToTextMAP = calcMAP(I, X, trainBatch.data, batchIdx)
+    print(string.format("Text to Image MAP = %.2f", textToImageMAP))
+    print(string.format("Image to Text MAP = %.2f", imageToTextMAP))
 end
---]]
 
 
 --[[
