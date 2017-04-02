@@ -63,7 +63,7 @@ function getBatch(batchNum, epoch_pos_perm, epoch_neg_perm)
         return self.data[1]:size(1) 
     end
 
-    return batch, batchIdx
+    return batch, batch_idx
 end
 
 
@@ -138,13 +138,13 @@ function calcMAP(fromModality, toModality, trainBatch, batchIdx) -- TODO: Remove
     if fromModality == I then
         -- queryLabels = test_labels_image:float()
         -- databaseLabels = train_labels_text:float()
-        queryLabels = train_labels_image:float():index(1, batch_idx:select(2,1):long())
-        databaseLabels = train_labels_text:float():index(1, batch_idx:select(2,2):long())
+        queryLabels = train_labels_image:float():index(1, batchIdx:select(2,1):long())
+        databaseLabels = train_labels_text:float():index(1, batchIdx:select(2,2):long())
     else
         -- queryLabels = test_labels_text:float()
         -- databaseLabels = train_labels_image:float()
-        queryLabels = train_labels_text:float():index(1, batch_idx:select(2,1):long())
-        databaseLabels = train_labels_image:float():index(1, batch_idx:select(2,2):long())
+        queryLabels = train_labels_text:float():index(1, batchIdx:select(2,1):long())
+        databaseLabels = train_labels_image:float():index(1, batchIdx:select(2,2):long())
     end
 
     -- Q = 1
