@@ -98,11 +98,7 @@ params, gradParams = model:getParameters()
 
 model:training()
 
-pos_pairs, neg_pars, p_size, n_size = pickSubset(true)
-
--- This permutation will be used for all of training. Examples will not be repeated
-pos_perm = torch.randperm(p_size):long()
-neg_perm = torch.randperm(n_size):long()
+pos_pairs, neg_pairs, p_size, n_size = pickSubset(true)
 
 -- The label tensor will be the same for each batch
 batch_sim_label = torch.Tensor(posExamplesPerBatch):fill(1)
@@ -126,8 +122,7 @@ trainBatch = {}
 
 if trainOnOneBatch == 1 then
   print("**************WARNING- Training on one batch only")
-  epoch_pos_perm, epoch_neg_perm = getEpochPerm(0)
-  trainBatch, batchIdx = getBatch(0, epoch_pos_perm, epoch_neg_perm)
+  trainBatch = getBatch(pos_pairs, neg_pairs, p_size, n_size)
 end
 
 totalLoss = 0
@@ -136,16 +131,12 @@ totalLoss = 0
 
 for epoch = 0, numEpochs - 1 do
 
-    if trainOnOneBatch == 0 then
-      epoch_pos_perm, epoch_neg_perm = getEpochPerm(epoch)
-    end
-
     epochLoss = 0
 
     for batchNum = 0, numBatches - 1 do
 
         if trainOnOneBatch == 0 then
-          trainBatch, batchIdx = getBatch(batchNum, epoch_pos_perm, epoch_neg_perm)
+          trainBatch = getBatch(pos_pairs, neg_pairs, p_size, n_size)
         end
 
         function feval(x)
@@ -192,11 +183,11 @@ for epoch = 0, numEpochs - 1 do
     imageAccuracy = calcClassAccuracy(imageClassifier:cuda(), testset[I]:cuda(), test_labels_image:cuda())
     textAccuracy = calcClassAccuracy(textClassifier:cuda(), testset[X]:cuda(), test_labels_text:cuda())
 
-    textToImageMAP = calcMAP(X, I, trainBatch.data, batchIdx) -- TODO: Remove trainBatch from both
-    imageToTextMAP = calcMAP(I, X, trainBatch.data, batchIdx)
+    textToImageMAP = calcMAP(X, I, trainBatch) -- TODO: Remove trainBatch from both
+    imageToTextMAP = calcMAP(I, X, trainBatch)
 
-    batchTextClassAcc = calcBatchClassAccuracy(textClassifier, trainBatch.data, X, batchIdx)
-    batchImageClassAcc = calcBatchClassAccuracy(imageClassifier, trainBatch.data, I, batchIdx)-- TODO: This is not very useful because it is only for the last batch in the epoch
+    batchTextClassAcc = calcBatchClassAccuracy(textClassifier, trainBatch, X)
+    batchImageClassAcc = calcBatchClassAccuracy(imageClassifier, trainBatch, I)-- TODO: This is not very useful because it is only for the last batch in the epoch
 
     print(string.format('Testset Image accuracy: %.2f', imageAccuracy))
     print(string.format('Testset Text accuracy: %.2f', textAccuracy))

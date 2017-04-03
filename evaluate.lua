@@ -57,25 +57,23 @@ function getHashCodes(data, modality)
     end
 end
 
-function calcMAP(fromModality, toModality, trainBatch, batchIdx) -- TODO: Remove 3rd and 4th parameters
+function calcMAP(fromModality, toModality, trainBatch) -- TODO: Remove 3rd and 4th parameters
 
     K = 50
 
     -- queryCodes = getHashCodes(testset, fromModality)
-    queryCodes = getHashCodes(trainBatch, fromModality) -- TODO: Switch back!!
+    queryCodes = getHashCodes(trainBatch.data, fromModality) -- TODO: Switch back!!
     -- databaseCodes = getHashCodes(trainset, toModality) -- Currently the database is only the trainset
-    databaseCodes = getHashCodes(trainBatch, toModality) -- TODO: Switch back!!!
+    databaseCodes = getHashCodes(trainBatch.data, toModality) -- TODO: Switch back!!!
 
+    queryLabels = trainBatch.labels[fromModality] -- TODO: Remove
+    databaseLabels = trainBatch.labels[toModality]
     if fromModality == I then
         -- queryLabels = test_labels_image:float()
         -- databaseLabels = train_labels_text:float()
-        queryLabels = train_labels_image:float():index(1, batchIdx:select(2,1):long())
-        databaseLabels = train_labels_text:float():index(1, batchIdx:select(2,2):long())
     else
         -- queryLabels = test_labels_text:float()
         -- databaseLabels = train_labels_image:float()
-        queryLabels = train_labels_text:float():index(1, batchIdx:select(2,1):long())
-        databaseLabels = train_labels_image:float():index(1, batchIdx:select(2,2):long())
     end
 
     -- Q = 1
@@ -113,18 +111,12 @@ function calcMAP(fromModality, toModality, trainBatch, batchIdx) -- TODO: Remove
     return mAP
 end
 
-function calcBatchClassAccuracy(classifier, trainBatch, modality, batchIdx)
+function calcBatchClassAccuracy(classifier, trainBatch, modality)
 
-    local testModel = nil
+    roundedOutput = classifier:forward(trainBatch.data[modality]):round()
+    labels = trainBatch.labels[modality]
 
-    roundedOutput = classifier:forward(trainBatch[modality]):round()
-    if modality == X then
-        labels = train_labels_text:index(1, batchIdx:select(2,1):long()):cuda()
-    else
-        labels = train_labels_image:index(1, batchIdx:select(2,2):long()):cuda()
-    end
-
-    numInstances = trainBatch[1]:size(1)
+    numInstances = roundedOutput:size(1)
     dotProd = torch.CudaTensor(numInstances)
     for i = 1, numInstances do
         dotProd[i] = torch.dot(roundedOutput[i], labels[i])

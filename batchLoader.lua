@@ -1,3 +1,30 @@
+function getBatch(pos_pairs, neg_pairs, p_size, n_size)
+
+    -- Choose positive and negative examples
+    idxInPosPairs = torch.rand(posExamplesPerBatch):mul(p_size):ceil():long()
+    idxInNegPairs = torch.rand(negExamplesPerBatch):mul(n_size):ceil():long()
+
+    batchPosPairs = pos_pairs:index(1, idxInPosPairs)
+    batchNegPairs = neg_pairs:index(1, idxInNegPairs)
+
+    batchIdxInTrainset = torch.cat(batchPosPairs, batchNegPairs, 1):long()
+
+    batch = {}
+    batch.data = {}
+    batch.labels = {}
+    batch.data[I] = trainset[I]:index(1, batchIdxInTrainset:select(2,1)) -- TODO: Fix long conversion in root pos_pairs and neg_pairs
+    batch.data[X] = trainset[X]:index(1, batchIdxInTrainset:select(2,2))
+    batch.data[I] = batch.data[I]:cuda()
+    batch.data[X] = batch.data[X]:cuda()
+    batch.labels[I] = train_labels_image:index(1, batchIdxInTrainset:select(2,1))
+    batch.labels[X] = train_labels_text:index(1, batchIdxInTrainset:select(2,2))
+    batch.labels[I] = batch.labels[I]:cuda()
+    batch.labels[X] = batch.labels[X]:cuda()
+
+    return batch
+end
+
+--[[
 function getEpochPerm(epoch)
 
     epoch_pos_perm = pos_perm[ {{ epoch*posExamplesPerEpoch + 1 , (epoch + 1)*posExamplesPerEpoch }} ]
@@ -41,3 +68,4 @@ function getBatch(batchNum, epoch_pos_perm, epoch_neg_perm)
 
     return batch, batch_idx
 end
+--]]
