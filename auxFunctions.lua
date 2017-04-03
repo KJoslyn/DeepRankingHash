@@ -1,12 +1,35 @@
+function subtractMean(data)
+
+    mean = {} -- store the mean, to normalize the test set in the future
+    stdv  = {} -- store the standard-deviation for the future
+    for i=1,3 do -- over each image channel
+        mean[i] = data[{ {}, {i}, {}, {}  }]:mean() -- mean estimation
+        data[{ {}, {i}, {}, {}  }]:add(-mean[i]) -- mean subtraction
+        data[{ {}, {i}, {}, {}  }]:add(-mean[i]) -- mean subtraction
+
+        stdv[i] = data[{ {}, {i}, {}, {}  }]:std() -- std estimation
+        data[{ {}, {i}, {}, {}  }]:div(stdv[i]) -- std scaling
+        data[{ {}, {i}, {}, {}  }]:div(stdv[i]) -- std scaling
+    end
+
+    return data
+end
+
 function getImageData()
 
-    local train_images = torch.load(filePath .. 'CNN Model/mirflickr_trainset.t7')
-    local test_images = torch.load(filePath .. 'CNN Model/mirflickr_testset.t7')
+    print('Getting image data')
+
+    train_images = torch.load(filePath .. 'CNN Model/mirflickr_trainset.t7')
+    test_images = torch.load(filePath .. 'CNN Model/mirflickr_testset.t7')
+    train_images.data = subtractMean(train_images.data)
+    test_images.data = subtractMean(test_images.data)
     trainset[I] = train_images.data
     testset[I] = test_images.data
 
     train_labels_image = train_images.label
     test_labels_image = test_images.label
+
+    print('Done getting image data')
 end
 
 function getTextData()
@@ -196,13 +219,41 @@ function calcMAP(fromModality, toModality, trainBatch, batchIdx) -- TODO: Remove
     return mAP
 end
 
-function calcClassAccuracy()
+function calcBatchClassAccuracy(classifier, trainBatch, modality, batchIdx)
 
+    local testModel = nil
+
+    roundedOutput = classifier:forward(trainBatch[modality]):round()
+    if modality == X then
+        labels = train_labels_text:index(1, batchIdx:select(2,1):long()):cuda()
+    else
+        labels = train_labels_image:index(1, batchIdx:select(2,2):long()):cuda()
+    end
+
+    numInstances = trainBatch[1]:size(1)
     dotProd = torch.CudaTensor(numInstances)
     for i = 1, numInstances do
-        dotProd[i] = torch.dot(roundedOutput[i], target[i])
+        dotProd[i] = torch.dot(roundedOutput[i], labels[i])
     end
     zero = torch.zeros(numInstances):cuda()
     numCorrect = dotProd:gt(zero):sum()
     accuracy = numCorrect * 100 / numInstances
+    
+    return accuracy
+end
+
+function calcClassAccuracy(classifier, data, labels)
+
+    roundedOutput = classifier:forward(data):round()
+
+    numInstances = data:size(1)
+    dotProd = torch.CudaTensor(numInstances)
+    for i = 1, numInstances do
+        dotProd[i] = torch.dot(roundedOutput[i], labels[i])
+    end
+    zero = torch.zeros(numInstances):cuda()
+    numCorrect = dotProd:gt(zero):sum()
+    accuracy = numCorrect * 100 / numInstances
+    
+    return accuracy
 end
