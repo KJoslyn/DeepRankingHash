@@ -38,7 +38,9 @@ X = 2 -- Table index for text modality
 filePath = '/home/kjoslyn/kevin/' -- server
 
 require 'pickSubset'
-require 'auxFunctions'
+require 'evaluate'
+require 'dataLoader'
+require 'batchLoader'
 require 'createModel'
 
 trainset = {}
