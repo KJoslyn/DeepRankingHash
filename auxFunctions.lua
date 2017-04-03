@@ -149,7 +149,7 @@ function getHashCodes(data, modality)
     end
 end
 
-function calcMAP(fromModality, toModality, trainBatch, batchIdx) -- TODO: Remove 3rd parameter
+function calcMAP(fromModality, toModality, trainBatch, batchIdx) -- TODO: Remove 3rd and 4th parameters
 
     K = 50
 
@@ -177,28 +177,12 @@ function calcMAP(fromModality, toModality, trainBatch, batchIdx) -- TODO: Remove
         query = torch.repeatTensor(queryCodes[q], databaseCodes:size(1), 1, 1)
         ne = torch.ne(query, databaseCodes):sum(2)
         ne = torch.reshape(ne, ne:size(1))
-        res, ind = torch.Tensor(ne:size(1)):copy(ne):topk(K)
+        topkResults, ind = torch.Tensor(ne:size(1)):copy(ne):topk(K)
 
-        res2, ind2 = torch.sort(res)
+        topkResults_sorted, ind2 = torch.sort(topkResults)
         topkIndices = ind:index(1,ind2)
 
         qLabel = queryLabels[q]
-
-        if trainOnOneBatch then
-            -- TODO: This is for testing only
-            numSimilar = 0
-            D = databaseLabels:size(1)
-            for d = 1,D do
-                dLabel = databaseLabels[d]
-                dotPod = torch.dot(qLabel, dLabel)
-                if dotPod > 0 then
-                    numSimilar = numSimilar + 1
-                end
-            end
-            numSimilar = math.min(numSimilar, K)
-        else
-            numSimilar = K
-        end
 
         AP = 0
         correct = 0
@@ -211,7 +195,9 @@ function calcMAP(fromModality, toModality, trainBatch, batchIdx) -- TODO: Remove
                 AP = AP + (correct / k) -- add precision component
             end
         end
-        AP = AP / numSimilar -- Recall component: same as multiplying each precision component by 1/K. This assumes >= K instances are similar
+        if correct > 0 then -- Correct should only be 0 if there are a small # of database objects and/or poorly trained
+            AP = AP / correct -- Recall component (divide by number of ground truth positives in top k)
+        end
         sumAPs = sumAPs + AP
     end
     mAP = sumAPs / Q

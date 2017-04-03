@@ -190,13 +190,14 @@ for epoch = 0, numEpochs - 1 do
     imageAccuracy = calcClassAccuracy(imageClassifier:cuda(), testset[I]:cuda(), test_labels_image:cuda())
     textAccuracy = calcClassAccuracy(textClassifier:cuda(), testset[X]:cuda(), test_labels_text:cuda())
 
-    print(string.format('Image accuracy: %.2f', imageAccuracy))
-    print(string.format('Text accuracy: %.2f', textAccuracy))
+    textToImageMAP = calcMAP(X, I, trainBatch.data, batchIdx) -- TODO: Remove trainBatch from both
+    imageToTextMAP = calcMAP(I, X, trainBatch.data, batchIdx)
 
-    -- textToImageMAP = calcMAP(X, I, trainBatch.data, batchIdx) -- TODO: Remove trainBatch from both
-    -- imageToTextMAP = calcMAP(I, X, trainBatch.data, batchIdx)
-    -- textClassificationAccuracy = calcBatchClassAccuracy(textClassifier, trainBatch.data, X, batchIdx) -- TODO: This is not very useful because it is only for the last batch in the epoch
-    -- imageClassificationAccuracy = calcBatchClassAccuracy(imageClassifier, trainBatch.data, I, batchIdx)
+    batchTextClassAcc = calcBatchClassAccuracy(textClassifier, trainBatch.data, X, batchIdx)
+    batchImageClassAcc = calcBatchClassAccuracy(imageClassifier, trainBatch.data, I, batchIdx)-- TODO: This is not very useful because it is only for the last batch in the epoch
+
+    print(string.format('Testset Image accuracy: %.2f', imageAccuracy))
+    print(string.format('Testset Text accuracy: %.2f', textAccuracy))
 
     -- testTextClassifier = getTextModel2()
     -- testImageClassifier = getImageModel2()
@@ -205,12 +206,12 @@ for epoch = 0, numEpochs - 1 do
 
     -- testTextClassificationAccuracy = calcBatchClassAccuracy(testTextClassifier, trainBatch.data, X, batchIdx) -- TODO: This is not very useful because it is only for the last batch in the epoch
     -- testImageClassificationAccuracy = calcBatchClassAccuracy(testImageClassifier, trainBatch.data, I, batchIdx)
-    -- print(string.format("Text to Image MAP = %.2f", textToImageMAP))
-    -- print(string.format("Image to Text MAP = %.2f", imageToTextMAP))
+    print(string.format("Batch Text to Image MAP = %.2f", textToImageMAP))
+    print(string.format("Batch Image to Text MAP = %.2f", imageToTextMAP))
     -- print(string.format("Text Classification Acc = %.2f", textClassificationAccuracy))
     -- print(string.format("Image Classification Acc = %.2f", imageClassificationAccuracy))
-    -- print(string.format("Test Text Classification Acc = %.2f", testTextClassificationAccuracy))
-    -- print(string.format("Test Image Classification Acc = %.2f", testImageClassificationAccuracy))
+    print(string.format("Batch Text Classification Acc = %.2f", batchTextClassAcc))
+    print(string.format("Batch Image Classification Acc = %.2f", batchImageClassAcc))
 end
 
 
