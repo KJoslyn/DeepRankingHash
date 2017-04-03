@@ -38,6 +38,28 @@ function getTextModel()
     return createClassifierAndHasher(model, 2048)
 end
 
+function getTextModel2()
+    local model = loadcaffe.load(filePath .. 'text model/tag_trainnet.prototxt', filePath .. 'text model/snapshot_iter_200.caffemodel', 'cudnn')
+
+    -- Remove first layer that comes from caffemodel
+    model.modules[1] = nil
+    for i = 1,#model.modules-1 do
+        model.modules[i] = model.modules[i+1]
+    end
+    model.modules[#model.modules] = nil
+
+    model:add(nn.Sigmoid())
+    return model
+end
+
+function getImageModel2()
+
+    local model = loadcaffe.load(filePath .. 'CNN Model/trainnet.prototxt', filePath .. 'CNN Model/snapshot_iter_16000.caffemodel', 'cudnn')
+    model:add(nn.Sigmoid())
+    return model
+end
+
+
 function createClassifierAndHasher(model, prevLayerSize)
 
     -- Grab classification layer and remove it
