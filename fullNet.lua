@@ -28,7 +28,7 @@ totNumExamplesPerBatch = posExamplesPerBatch + negExamplesPerBatch
 numBatches = epochSize / totNumExamplesPerBatch
 
 -- Variable Boolean Parameters (1 or 0)
-trainOnOneBatch   = 1
+trainOnOneBatch   = 0
 loadModelFromFile = 0
 saveModelToFile   = 0
 
@@ -37,45 +37,55 @@ I = 1 -- Table index for image modality
 X = 2 -- Table index for text modality
 filePath = '/home/kjoslyn/kevin/' -- server
 
+package.loaded.pickSubset = nil
+package.loaded.evaluate = nil
+package.loaded.dataLoader = nil
+package.loaded.batchLoader = nil
+package.loaded.createModel = nil
 require 'pickSubset'
-require 'auxFunctions'
+require 'evaluate'
+require 'dataLoader'
+require 'batchLoader'
 require 'createModel'
 
-trainset = {}
-testset = {}
-
-if loadModelFromFile == 1 then
-    print('***Loading model from file')
-    modelData = torch.load('modelData.t7')
-    imageClassifier = modelData.imageClassifier
-    imageHasher = modelData.imageHasher
-    textClassifier = modelData.textClassifier
-    textHasher = modelData.textHasher
-    model = modelData.combinedModel
-else
-    imageClassifier, imageHasher = getImageModel()
-    textClassifier, textHasher = getTextModel()
-    model = createCombinedModel(imageHasher, textHasher)
-
-    if saveModelToFile == 1 then
-      print('***Saving model to file')
-      modelData = {}
-      modelData.imageClassifier = imageClassifier
-      modelData.imageHasher = imageHasher
-      modelData.textClassifier = textClassifier
-      modelData.textHasher = textHasher
-      modelData.combinedModel = model
-      torch.save('modelData.t7', modelData)
+if not model then
+    if loadModelFromFile == 1 then
+        print('***Loading model from file')
+        modelData = torch.load('modelData.t7')
+        imageClassifier = modelData.imageClassifier
+        imageHasher = modelData.imageHasher
+        textClassifier = modelData.textClassifier
+        textHasher = modelData.textHasher
+        model = modelData.combinedModel
     else
-      print('***Skipping save model to file')
+        imageClassifier, imageHasher = getImageModel()
+        textClassifier, textHasher = getTextModel()
+        model = createCombinedModel(imageHasher, textHasher)
+
+        if saveModelToFile == 1 then
+        print('***Saving model to file')
+        modelData = {}
+        modelData.imageClassifier = imageClassifier
+        modelData.imageHasher = imageHasher
+        modelData.textClassifier = textClassifier
+        modelData.textHasher = textHasher
+        modelData.combinedModel = model
+        torch.save('modelData.t7', modelData)
+        else
+        print('***Skipping save model to file')
+        end
     end
 end
 
 -- TODO: Make these return something instead of global variables?
-getImageData()
-getTextData()
+if not trainset then
+    trainset = {}
+    testset = {}
+    getImageData()
+    getTextData()
+end
 
--- calcMAP(X, I) -- TODO: Remove
+-- calcMAP(X, I, nil) -- TODO: Remove
 
 criterion = getCriterion()
 
@@ -96,11 +106,12 @@ params, gradParams = model:getParameters()
 
 model:training()
 
-pos_pairs, neg_pars, p_size, n_size = pickSubset(true)
-
--- This permutation will be used for all of training. Examples will not be repeated
-pos_perm = torch.randperm(p_size):long()
-neg_perm = torch.randperm(n_size):long()
+if not pos_pairs then
+    pos_pairs, neg_pairs, p_size, n_size = pickSubset(true)
+end
+-- TODO: These are global variables that come from pickSubset. I want to return them instead but the compiler gives an error.
+trainImages = imageIdx:long()
+trainTexts = textIdx:long()
 
 -- The label tensor will be the same for each batch
 batch_sim_label = torch.Tensor(posExamplesPerBatch):fill(1)
@@ -124,26 +135,24 @@ trainBatch = {}
 
 if trainOnOneBatch == 1 then
   print("**************WARNING- Training on one batch only")
-  epoch_pos_perm, epoch_neg_perm = getEpochPerm(0)
-  trainBatch, batchIdx = getBatch(0, epoch_pos_perm, epoch_neg_perm)
+  trainBatch = getBatch(pos_pairs, neg_pairs, p_size, n_size)
 end
 
 totalLoss = 0
 -- epochHistorySize = 5
 -- epochHistoryLoss = torch.Tensor(epochHistorySize):fill(0)
 
-for epoch = 0, numEpochs - 1 do
+sf = io.open("stats.txt", "w")
+sfv = io.open("stats_verbose.txt", "w")
 
-    if trainOnOneBatch == 0 then
-      epoch_pos_perm, epoch_neg_perm = getEpochPerm(epoch)
-    end
+for epoch = 0, numEpochs - 1 do
 
     epochLoss = 0
 
     for batchNum = 0, numBatches - 1 do
 
         if trainOnOneBatch == 0 then
-          trainBatch, batchIdx = getBatch(batchNum, epoch_pos_perm, epoch_neg_perm)
+          trainBatch = getBatch(pos_pairs, neg_pairs, p_size, n_size)
         end
 
         function feval(x)
@@ -181,39 +190,37 @@ for epoch = 0, numEpochs - 1 do
     end
     -- epochPred = model:forward(trainBatch.data)
 
-    print("=====Epoch " .. epoch)
-    printStats(trainBatch, batch_sim_label) -- TODO: This is not very useful because it is only for the last batch in the epoch
-    print(string.format("Avg Loss this epoch = %.2f", epochLoss / numBatches))
-    -- print(string.format("Avg Loss last %d epochs = %.2f", epochHistorySize, epochHistoryLoss:sum() / epochHistorySize))
-    print(string.format("Avg Loss overall = %.2f", totalLoss / iterationsComplete))
+    -- batchTextToImageMAP = calcMAP(X, I, trainBatch)
+    -- batchImageToTextMAP = calcMAP(I, X, trainBatch)
+    textToImageMAP = calcMAP(X, I, nil)
+    imageToTextMAP = calcMAP(I, X, nil)
 
-    imageAccuracy = calcClassAccuracy(imageClassifier:cuda(), testset[I]:cuda(), test_labels_image:cuda())
-    textAccuracy = calcClassAccuracy(textClassifier:cuda(), testset[X]:cuda(), test_labels_text:cuda())
+    imageAccuracy = calcClassAccuracy(I)
+    textAccuracy = calcClassAccuracy(X)
 
-    textToImageMAP = calcMAP(X, I, trainBatch.data, batchIdx) -- TODO: Remove trainBatch from both
-    imageToTextMAP = calcMAP(I, X, trainBatch.data, batchIdx)
+    batchTextClassAcc = calcBatchClassAccuracy(textClassifier, trainBatch, X)
+    batchImageClassAcc = calcBatchClassAccuracy(imageClassifier, trainBatch, I)-- TODO: This is not very useful because it is only for the last batch in the epoch
 
-    batchTextClassAcc = calcBatchClassAccuracy(textClassifier, trainBatch.data, X, batchIdx)
-    batchImageClassAcc = calcBatchClassAccuracy(imageClassifier, trainBatch.data, I, batchIdx)-- TODO: This is not very useful because it is only for the last batch in the epoch
+    statsPrint("=====Epoch " .. epoch, sf, sfv)
+    calcAndPrintHammingAccuracy(trainBatch, batch_sim_label, sfv) -- TODO: This is not very useful because it is only for the last batch in the epoch
 
-    print(string.format('Testset Image accuracy: %.2f', imageAccuracy))
-    print(string.format('Testset Text accuracy: %.2f', textAccuracy))
+    statsPrint(string.format("Avg Loss this epoch = %.2f", epochLoss / numBatches), sf, sfv)
+    statsPrint(string.format("Avg Loss overall = %.2f", totalLoss / iterationsComplete), sf, sfv)
 
-    -- testTextClassifier = getTextModel2()
-    -- testImageClassifier = getImageModel2()
-    -- testTextClassifier = testTextClassifier:cuda()
-    -- testImageClassifier = testImageClassifier:cuda()
+    -- statsPrint(string.format("Batch Text to Image MAP = %.2f", batchTextToImageMAP))
+    -- statsPrint(string.format("Batch Image to Text MAP = %.2f", batchImageToTextMAP))
+    statsPrint(string.format("Text to Image MAP = %.2f", textToImageMAP), sf, sfv)
+    statsPrint(string.format("Image to Text MAP = %.2f", imageToTextMAP), sf, sfv)
 
-    -- testTextClassificationAccuracy = calcBatchClassAccuracy(testTextClassifier, trainBatch.data, X, batchIdx) -- TODO: This is not very useful because it is only for the last batch in the epoch
-    -- testImageClassificationAccuracy = calcBatchClassAccuracy(testImageClassifier, trainBatch.data, I, batchIdx)
-    print(string.format("Batch Text to Image MAP = %.2f", textToImageMAP))
-    print(string.format("Batch Image to Text MAP = %.2f", imageToTextMAP))
-    -- print(string.format("Text Classification Acc = %.2f", textClassificationAccuracy))
-    -- print(string.format("Image Classification Acc = %.2f", imageClassificationAccuracy))
-    print(string.format("Batch Text Classification Acc = %.2f", batchTextClassAcc))
-    print(string.format("Batch Image Classification Acc = %.2f", batchImageClassAcc))
+    statsPrint(string.format('Image Classification Acc: %.2f', imageAccuracy), sf, sfv)
+    statsPrint(string.format('Text Classification Acc: %.2f', textAccuracy), sf, sfv)
+
+    statsPrint(string.format("Batch Text Classification Acc = %.2f", batchTextClassAcc), sfv)
+    statsPrint(string.format("Batch Image Classification Acc = %.2f", batchImageClassAcc), sfv)
 end
 
+io.close(sf)
+io.close(sfv)
 
 --[[
 model:evaluate()

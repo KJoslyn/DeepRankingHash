@@ -35,12 +35,14 @@ function pickSubset(loadPairsFromFile)
 
 		pos_pairs = train_pairs.pos_pairs
 		neg_pairs = train_pairs.neg_pairs
+		imageIdx = train_pairs.imageIdx
+		textIdx = train_pairs.imageIdx
 	end
 
 	p_size = pos_pairs:size(1)
 	n_size = neg_pairs:size(1)
 
-	return pos_pairs, neg_pairs, p_size, n_size
+	return pos_pairs, neg_pairs, p_size, n_size -- TODO: I want to return imageIdx and textIdx but compiler gives error
 end
 
 pos_pairs, neg_pars, p_size, n_size = pickSubset(true)
