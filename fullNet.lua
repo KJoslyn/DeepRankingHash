@@ -8,7 +8,7 @@ require 'cunn'
 require 'cudnn'
 
 -- Variable Parameters
-numEpochs = 400 -- 416 is max number without truncating an epoch
+numEpochs = 2 -- 416 is max number without truncating an epoch
 -- posExamplesPerEpoch = 1e4
 -- negExamplesPerEpoch = 5e4
 posExamplesPerEpoch = 20*100
@@ -36,6 +36,7 @@ saveModelToFile   = 0
 I = 1 -- Table index for image modality
 X = 2 -- Table index for text modality
 filePath = '/home/kjoslyn/kevin/' -- server
+snapshotDir = '/home/kjoslyn/kevin/FullNet/snapshots'
 
 package.loaded.pickSubset = nil
 package.loaded.evaluate = nil
@@ -104,8 +105,6 @@ local optimState = {
 
 params, gradParams = model:getParameters()
 
-model:training()
-
 if not pos_pairs then
     pos_pairs, neg_pairs, p_size, n_size = pickSubset(true)
 end
@@ -142,8 +141,10 @@ totalLoss = 0
 -- epochHistorySize = 5
 -- epochHistoryLoss = torch.Tensor(epochHistorySize):fill(0)
 
-sf = io.open("stats.txt", "w")
-sfv = io.open("stats_verbose.txt", "w")
+sf = io.open(snapshotDir .. "/stats.txt", "w")
+sfv = io.open(snapshotDir .. "/stats_verbose.txt", "w")
+
+model:training()
 
 for epoch = 0, numEpochs - 1 do
 
@@ -188,6 +189,8 @@ for epoch = 0, numEpochs - 1 do
 
         -- collectgarbage()
     end
+
+    model:evaluate()
     -- epochPred = model:forward(trainBatch.data)
 
     -- batchTextToImageMAP = calcMAP(X, I, trainBatch)
@@ -217,6 +220,12 @@ for epoch = 0, numEpochs - 1 do
 
     statsPrint(string.format("Batch Text Classification Acc = %.2f", batchTextClassAcc), sfv)
     statsPrint(string.format("Batch Image Classification Acc = %.2f", batchImageClassAcc), sfv)
+
+    local paramsToSave, gp = model:getParameters()
+    local snapshot = snapshotDir .. "/snapshot_epoch_" .. epoch .. ".t7" 
+    torch.save(snapshot, paramsToSave)
+
+    model:training()
 end
 
 io.close(sf)
