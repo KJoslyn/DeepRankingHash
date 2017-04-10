@@ -101,7 +101,7 @@ function calcRoundedOutput(data)
     if data:size(2) == 3 then -- Image modality
         return imageClassifier:cuda():forward(data:cuda()):round()
     else -- Text modality
-        return textClassifier:cuda():forward(data:cuda())
+        return textClassifier:cuda():forward(data:cuda()):round()
     end
     -- return classifier:forward(data:cuda()):round()
 end

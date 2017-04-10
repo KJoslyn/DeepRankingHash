@@ -8,7 +8,7 @@ require 'cunn'
 require 'cudnn'
 
 -- Variable Parameters
-numEpochs = 20 -- 416 is max number without truncating an epoch
+numEpochs = 400 -- 416 is max number without truncating an epoch
 -- posExamplesPerEpoch = 1e4
 -- negExamplesPerEpoch = 5e4
 posExamplesPerEpoch = 20*100
