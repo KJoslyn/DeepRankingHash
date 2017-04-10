@@ -8,7 +8,7 @@ require 'cunn'
 require 'cudnn'
 
 -- Variable Parameters
-numEpochs = 2 -- 416 is max number without truncating an epoch
+numEpochs = 20 -- 416 is max number without truncating an epoch
 -- posExamplesPerEpoch = 1e4
 -- negExamplesPerEpoch = 5e4
 posExamplesPerEpoch = 20*100
@@ -86,7 +86,15 @@ if not trainset then
     getTextData()
 end
 
+if not pos_pairs then
+    pos_pairs, neg_pairs, p_size, n_size = pickSubset(true)
+end
+-- TODO: These are global variables that come from pickSubset. I want to return them instead but the compiler gives an error.
+trainImages = imageIdx:long()
+trainTexts = textIdx:long()
+
 -- calcMAP(X, I, nil) -- TODO: Remove
+-- calcMAP(I, X, nil) -- TODO: Remove
 
 criterion = getCriterion()
 
@@ -104,13 +112,6 @@ local optimState = {
 }
 
 params, gradParams = model:getParameters()
-
-if not pos_pairs then
-    pos_pairs, neg_pairs, p_size, n_size = pickSubset(true)
-end
--- TODO: These are global variables that come from pickSubset. I want to return them instead but the compiler gives an error.
-trainImages = imageIdx:long()
-trainTexts = textIdx:long()
 
 -- The label tensor will be the same for each batch
 batch_sim_label = torch.Tensor(posExamplesPerBatch):fill(1)
@@ -141,12 +142,14 @@ totalLoss = 0
 -- epochHistorySize = 5
 -- epochHistoryLoss = torch.Tensor(epochHistorySize):fill(0)
 
-sf = io.open(snapshotDir .. "/stats.txt", "w")
-sfv = io.open(snapshotDir .. "/stats_verbose.txt", "w")
+date = os.date("*t", os.time())
+dateStr = date.month .. "_" .. date.day .. "_" .. date.hour .. "_" .. date.min
+sf = io.open(snapshotDir .. "/stats_" .. dateStr .. ".txt", "w")
+sfv = io.open(snapshotDir .. "/stats_verbose_" .. dateStr .. ".txt", "w")
 
 model:training()
 
-for epoch = 0, numEpochs - 1 do
+for epoch = 1, numEpochs  do
 
     epochLoss = 0
 
@@ -195,35 +198,44 @@ for epoch = 0, numEpochs - 1 do
 
     -- batchTextToImageMAP = calcMAP(X, I, trainBatch)
     -- batchImageToTextMAP = calcMAP(I, X, trainBatch)
-    textToImageMAP = calcMAP(X, I, nil)
-    imageToTextMAP = calcMAP(I, X, nil)
+    if epoch % 5 == 0 then
+        textToImageMAP = calcMAP(X, I, nil)
+        imageToTextMAP = calcMAP(I, X, nil)
 
-    imageAccuracy = calcClassAccuracy(I)
-    textAccuracy = calcClassAccuracy(X)
+        imageAccuracy = calcClassAccuracy(I)
+        textAccuracy = calcClassAccuracy(X)
 
-    batchTextClassAcc = calcBatchClassAccuracy(textClassifier, trainBatch, X)
-    batchImageClassAcc = calcBatchClassAccuracy(imageClassifier, trainBatch, I)-- TODO: This is not very useful because it is only for the last batch in the epoch
+        batchTextClassAcc = calcBatchClassAccuracy(textClassifier, trainBatch, X)
+        batchImageClassAcc = calcBatchClassAccuracy(imageClassifier, trainBatch, I)-- TODO: This is not very useful because it is only for the last batch in the epoch
 
-    statsPrint("=====Epoch " .. epoch, sf, sfv)
-    calcAndPrintHammingAccuracy(trainBatch, batch_sim_label, sfv) -- TODO: This is not very useful because it is only for the last batch in the epoch
+        statsPrint("=====Epoch " .. epoch, sf, sfv)
+        calcAndPrintHammingAccuracy(trainBatch, batch_sim_label, sfv) -- TODO: This is not very useful because it is only for the last batch in the epoch
 
-    statsPrint(string.format("Avg Loss this epoch = %.2f", epochLoss / numBatches), sf, sfv)
-    statsPrint(string.format("Avg Loss overall = %.2f", totalLoss / iterationsComplete), sf, sfv)
+        statsPrint(string.format("Avg Loss this epoch = %.2f", epochLoss / numBatches), sf, sfv)
+        statsPrint(string.format("Avg Loss overall = %.2f", totalLoss / iterationsComplete), sf, sfv)
 
-    -- statsPrint(string.format("Batch Text to Image MAP = %.2f", batchTextToImageMAP))
-    -- statsPrint(string.format("Batch Image to Text MAP = %.2f", batchImageToTextMAP))
-    statsPrint(string.format("Text to Image MAP = %.2f", textToImageMAP), sf, sfv)
-    statsPrint(string.format("Image to Text MAP = %.2f", imageToTextMAP), sf, sfv)
+        -- statsPrint(string.format("Batch Text to Image MAP = %.2f", batchTextToImageMAP))
+        -- statsPrint(string.format("Batch Image to Text MAP = %.2f", batchImageToTextMAP))
+        statsPrint(string.format("Text to Image MAP = %.2f", textToImageMAP), sf, sfv)
+        statsPrint(string.format("Image to Text MAP = %.2f", imageToTextMAP), sf, sfv)
 
-    statsPrint(string.format('Image Classification Acc: %.2f', imageAccuracy), sf, sfv)
-    statsPrint(string.format('Text Classification Acc: %.2f', textAccuracy), sf, sfv)
+        statsPrint(string.format('Image Classification Acc: %.2f', imageAccuracy), sf, sfv)
+        statsPrint(string.format('Text Classification Acc: %.2f', textAccuracy), sf, sfv)
 
-    statsPrint(string.format("Batch Text Classification Acc = %.2f", batchTextClassAcc), sfv)
-    statsPrint(string.format("Batch Image Classification Acc = %.2f", batchImageClassAcc), sfv)
+        statsPrint(string.format("Batch Text Classification Acc = %.2f", batchTextClassAcc), sfv)
+        statsPrint(string.format("Batch Image Classification Acc = %.2f", batchImageClassAcc), sfv)
+    end
 
-    local paramsToSave, gp = model:getParameters()
-    local snapshot = snapshotDir .. "/snapshot_epoch_" .. epoch .. ".t7" 
-    torch.save(snapshot, paramsToSave)
+    if epoch % 50 == 0 then
+        local paramsToSave, gp = model:getParameters()
+        local snapshotFile = snapshotDir .. "/snapshot_epoch_" .. epoch .. ".t7" 
+        local snapshot = {}
+        snapshot.params = paramsToSave
+        if epoch % 100 == 0 then
+            snapshot.gparams = gp
+        end
+        torch.save(snapshotFile, snapshot)
+    end
 
     model:training()
 end

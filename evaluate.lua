@@ -23,11 +23,14 @@ function calcMAP(fromModality, toModality) -- TODO: Remove 3rd and 4th parameter
 
     K = 50
 
+    local numQueries = 5000
+    local numDatabase = 5000
+
     if fromModality == I then
         -- trainImages and trainTexts come from pickSubset.lua. They are the indices of the images and texts that are
         -- used in training. They index trainset[modality]. Only 5000 images and 5000 texts are used for training.
-        images = trainImages[ {{ 1, 1000 }} ]:long()
-        texts = trainTexts[ {{ 1, 4000 }} ]:long()
+        images = trainImages[ {{ 1, numQueries }} ]:long()
+        texts = trainTexts[ {{ 1, numDatabase }} ]:long()
 
         queries = trainset[I]:index(1, images)
         database = trainset[X]:index(1, texts)
@@ -35,8 +38,8 @@ function calcMAP(fromModality, toModality) -- TODO: Remove 3rd and 4th parameter
         queryLabels = train_labels_image:float():index(1, images)
         databaseLabels = train_labels_text:float():index(1, texts)
     else
-        texts = trainTexts[ {{ 1, 1000 }} ]:long()
-        images = trainImages[ {{ 1, 4000 }} ]:long()
+        texts = trainTexts[ {{ 1, numQueries }} ]:long()
+        images = trainImages[ {{ 1, numDatabase }} ]:long()
 
         queries = trainset[X]:index(1, texts)
         database = trainset[I]:index(1, images)

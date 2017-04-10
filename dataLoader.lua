@@ -1,28 +1,22 @@
-function subtractMean(data)
-
-    mean = {} -- store the mean, to normalize the test set in the future
-    stdv  = {} -- store the standard-deviation for the future
-    for i=1,3 do -- over each image channel
-        mean[i] = data[{ {}, {i}, {}, {}  }]:mean() -- mean estimation
-        data[{ {}, {i}, {}, {}  }]:add(-mean[i]) -- mean subtraction
-        data[{ {}, {i}, {}, {}  }]:add(-mean[i]) -- mean subtraction
-
-        stdv[i] = data[{ {}, {i}, {}, {}  }]:std() -- std estimation
-        data[{ {}, {i}, {}, {}  }]:div(stdv[i]) -- std scaling
-        data[{ {}, {i}, {}, {}  }]:div(stdv[i]) -- std scaling
-    end
-
-    return data
-end
-
 function getImageData()
 
     print('Getting image data')
 
     train_images = torch.load(filePath .. 'CNN Model/mirflickr_trainset.t7')
     test_images = torch.load(filePath .. 'CNN Model/mirflickr_testset.t7')
-    train_images.data = subtractMean(train_images.data)
-    test_images.data = subtractMean(test_images.data)
+
+    mean = {} -- store the mean, to normalize the test set in the future
+    stdv  = {} -- store the standard-deviation for the future
+    for i=1,3 do -- over each image channel
+        mean[i] = train_images.data[{ {}, {i}, {}, {}  }]:mean() -- mean estimation
+        train_images.data[{ {}, {i}, {}, {}  }]:add(-mean[i]) -- mean subtraction
+        test_images.data[{ {}, {i}, {}, {}  }]:add(-mean[i]) -- mean subtraction
+
+        stdv[i] = train_images.data[{ {}, {i}, {}, {}  }]:std() -- std estimation
+        train_images.data[{ {}, {i}, {}, {}  }]:div(stdv[i]) -- std scaling
+        test_images.data[{ {}, {i}, {}, {}  }]:div(stdv[i]) -- std scaling
+    end
+
     trainset[I] = train_images.data
     testset[I] = test_images.data
 
