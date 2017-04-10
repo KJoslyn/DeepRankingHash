@@ -36,7 +36,7 @@ function pickSubset(loadPairsFromFile)
 		pos_pairs = train_pairs.pos_pairs
 		neg_pairs = train_pairs.neg_pairs
 		imageIdx = train_pairs.imageIdx
-		textIdx = train_pairs.imageIdx
+		textIdx = train_pairs.textIdx
 	end
 
 	p_size = pos_pairs:size(1)

@@ -82,8 +82,7 @@ end
 if not trainset then
     trainset = {}
     testset = {}
-    getImageData()
-    getTextData()
+    getData()
 end
 
 if not pos_pairs then

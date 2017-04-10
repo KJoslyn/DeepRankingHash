@@ -38,3 +38,10 @@ function getTextData()
     test_labels_text = torch.load(filePath .. 'mirflickrLabelTe.t7') -- load from t7 file
     test_labels_text = test_labels_text.L_te
 end
+
+function getData() 
+    getImageData()
+    getTextData()
+    trainset[3] = torch.range(1, trainset[1]:size(1))
+end
+
