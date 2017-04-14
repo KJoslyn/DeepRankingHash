@@ -19,9 +19,7 @@ function calcAndPrintHammingAccuracy(trainBatch, similarity_target, statsFile)
     -- print("Accuracy: " .. accuracy * 100)
 end
 
-function calcMAP(fromModality, toModality) -- TODO: Remove 3rd and 4th parameters
-
-    K = 50
+function getQueryAndDBCodes(fromModality, toModality)
 
     local numQueries = 5000
     local numDatabase = 5000
@@ -51,6 +49,42 @@ function calcMAP(fromModality, toModality) -- TODO: Remove 3rd and 4th parameter
     queryCodes = getHashCodes(queries)
     databaseCodes = getHashCodes(database)
 
+    return queryCodes, databaseCodes, queryLabels, databaseLabels
+end
+
+function getDistanceAndSimilarityForMAP(queryCodes, databaseCodes, queryLabels, databaseLabels)
+
+    queryLabels = queryLabels:cuda()
+    databaseLabels = databaseLabels:cuda()
+
+    numQueries = queryCodes:size(1)
+    numDB = databaseCodes:size(1)
+
+    D = torch.CudaByteTensor(numQueries, numDB)
+    S = torch.CudaTensor(numQueries, numDB)
+    sumAPs = 0
+    for q = 1,numQueries do
+        queryCodeRep = torch.expand(queryCodes[q]:reshape(L,1), L, numDB):transpose(1,2)
+        D[q] = torch.ne(queryCodeRep, databaseCodes):sum(2)
+
+        queryLabelRep = torch.expand(queryLabels[q]:reshape(24,1), 24, numDB):transpose(1,2)
+        S[q] = torch.cmul(queryLabelRep, databaseLabels):max(2)
+
+        -- for d = 1,numDB do
+        --     S[q][d] = torch.dot(queryLabels[q], databaseLabels[d])
+        -- end
+        -- S = S:clamp(0,1)
+    end
+
+    return D, S
+end
+
+function calcMAP(fromModality, toModality)
+
+    K = 50
+
+    queryCodes, databaseCodes, queryLabels, databaseLabels = getQueryAndDBCodes(fromModality, toModality)
+
     -- Q = 1
     Q = queryCodes:size(1)
     sumAPs = 0
@@ -66,7 +100,8 @@ function calcMAP(fromModality, toModality) -- TODO: Remove 3rd and 4th parameter
         ne = torch.reshape(ne, ne:size(1))
         topkResults, ind = torch.Tensor(ne:size(1)):copy(ne):topk(K)
 
-        topkResults_sorted, ind2 = torch.sort(topkResults)
+        ind2 = randSort(topkResults)
+        -- topkResults_sorted, ind2 = torch.sort(topkResults)
         topkIndices = ind:index(1,ind2)
 
         qLabel = queryLabels[q]
@@ -188,4 +223,26 @@ function statsPrint(line, statsFile1, statsFile2)
         statsFile2:write(line .. "\n")
     end
     print(line)
+end
+
+function randSort(vals)
+
+    local edges = {}
+    edges[1] = 1
+    local i = 2
+    for i = 2,vals:size(1) do
+        if vals[i] > vals[i-1] then
+            edges[#edges+1] = i
+        end
+    end
+    edges[#edges+1] = vals:size(1) + 1
+
+    local ind = torch.Tensor()
+    for e = 2,#edges do
+        local perm = torch.randperm(edges[e] - edges[e-1])
+        local perm = perm:add(edges[e-1] - 1)
+        ind = torch.cat(ind, perm)
+    end
+
+    return ind:long()
 end

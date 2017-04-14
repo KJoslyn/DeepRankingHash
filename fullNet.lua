@@ -44,7 +44,7 @@ function loadModelAndData()
   end
 
   -- Variable Parameters
-  numEpochs = 400 -- 416 is max number without truncating an epoch
+  numEpochs = 200 -- 416 is max number without truncating an epoch
   -- posExamplesPerEpoch = 1e4
   -- negExamplesPerEpoch = 5e4
   posExamplesPerEpoch = 20*100
@@ -52,8 +52,8 @@ function loadModelAndData()
   L = 8
   k = 4
   hashLayerSize = L * k
-  local baseLearningRate = 1e-6
-  local baseWeightDecay = 0
+  baseLearningRate = 1e-6
+  baseWeightDecay = 0
   lrMultForHashLayer = 1e5 -- 1e4, 1e5, etc
   posExamplesPerBatch = 20
   negExamplesPerBatch = 100

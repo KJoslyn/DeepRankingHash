@@ -10,27 +10,7 @@ function calcMAPTest(fromModality, toModality, printToFile) -- TODO: Remove 3rd 
 
     K = 50
 
-    local numQueries = 5000
-    local numDatabase = 5000
-
-    if fromModality == I then
-
-        queries = testset[I]
-        database = trainset[X]
-
-        queryLabels = test_labels_image:float()
-        databaseLabels = train_labels_text:float()
-    else
-
-        queries = testset[X]
-        database = trainset[I]
-
-        queryLabels = test_labels_text:float()
-        databaseLabels = train_labels_image:float()
-    end
-
-    queryCodes = getHashCodes(queries)
-    databaseCodes = getHashCodes(database)
+    queryCodes, databaseCodes, queryLabels, databaseLabels = getQueryAndDBCodesTest(fromModality, toModality)
 
     -- Q = 2
     Q = queryCodes:size(1)
@@ -93,6 +73,49 @@ function calcMAPTest(fromModality, toModality, printToFile) -- TODO: Remove 3rd 
     end
 
     return mAP
+end
+
+function getQueryAndDBCodesTest(fromModality, toModality)
+
+    local numQueries = 5000
+    local numDatabase = 5000
+
+    if fromModality == I then
+
+        queries = testset[I]
+        database = trainset[X]
+
+        queryLabels = test_labels_image:float()
+        databaseLabels = train_labels_text:float()
+    else
+
+        queries = testset[X]
+        database = trainset[I]
+
+        queryLabels = test_labels_text:float()
+        databaseLabels = train_labels_image:float()
+    end
+
+    queryCodes = getHashCodes(queries)
+    databaseCodes = getHashCodes(database)
+
+    return queryCodes, databaseCodes, queryLabels, databaseLabels
+end
+
+function doGetDistanceAndSimilarityForMAPTest(fromModality, toModality, saveToMatFile)
+
+    queryCodes, databaseCodes, queryLabels, databaseLabels = getQueryAndDBCodesTest(fromModality, toModality)
+    D, S =  getDistanceAndSimilarityForMAP(queryCodes, databaseCodes, queryLabels, databaseLabels) -- in evaluate.lua. TODO: Make D, S local
+    local D_new = torch.LongTensor(D:size(1),D:size(2)):copy(D)
+    local S_new = torch.LongTensor(S:size(1),S:size(2)):copy(S)
+    if saveToMatFile then
+        if not matio then
+            matio = require 'matio'
+        end
+        date = os.date("*t", os.time())
+        dateStr = date.month .. "_" .. date.day .. "_" .. date.hour .. "_" .. date.min
+        matio.save(snapshotDir .. '/DS_data_' .. dateStr .. '.mat', {D=D_new,S=S_new})
+    end
 end
 
 function randSort(vals)
