@@ -1,3 +1,6 @@
+--TODO: Rename model to imageClassifier and remove calcClassAccuracy functions
+--TODO: Remove data loader methods and use aux methods
+
 require 'nn'
 require 'loadcaffe' -- doesn't work on server
 require 'image'
@@ -112,6 +115,8 @@ function loadData(small)
         trainset.data[{ {}, {i}, {}, {}  }]:div(stdv[i]) -- std scaling
         testset.data[{ {}, {i}, {}, {}  }]:div(stdv[i]) -- std scaling
     end
+
+    -- trainset, testset = loadImageData(small)
 end
 
 function loadModel()

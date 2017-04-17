@@ -1,8 +1,5 @@
 
--- loadModelAndData()
--- trainAndEvaluate()
-
-function loadPackages() 
+function loadStandardPackages() 
 
   require 'nn'
   require 'loadcaffe' -- doesn't work on server
@@ -14,6 +11,20 @@ function loadPackages()
   require 'cudnn'
 
 end -- end loadPackages()
+
+function loadCustomPackages()
+
+  package.loaded.pickSubset = nil
+  package.loaded.evaluate = nil
+  package.loaded.dataLoader = nil
+  package.loaded.batchLoader = nil
+  package.loaded.createModel = nil
+  require 'pickSubset'
+  require 'auxf.evaluate'
+  require 'auxf.dataLoader'
+  require 'batchLoader'
+  require 'createModel'
+end
 
 function loadModelSnapshot()
 
@@ -40,7 +51,7 @@ end
 function loadModelAndData() 
 
   if not nn then
-    loadPackages()
+    loadStandardPackages()
   end
 
   -- Variable Parameters
@@ -74,16 +85,7 @@ function loadModelAndData()
   filePath = '/home/kjoslyn/kevin/' -- server
   snapshotDir = '/home/kjoslyn/kevin/FullNet/snapshots'
 
-  package.loaded.pickSubset = nil
-  package.loaded.evaluate = nil
-  package.loaded.dataLoader = nil
-  package.loaded.batchLoader = nil
-  package.loaded.createModel = nil
-  require 'pickSubset'
-  require 'evaluate'
-  require 'dataLoader'
-  require 'batchLoader'
-  require 'createModel'
+  loadCustomPackages()
 
   if not model then
       if loadModelFromFile == 1 then
@@ -114,11 +116,19 @@ function loadModelAndData()
       end
   end
 
-  -- TODO: Make these return something instead of global variables?
   if not trainset then
       trainset = {}
       testset = {}
-      getData()
+
+      -- train_images and test_images each contain data and label fields
+      train_images, test_images = getImageData()
+      trainset[I] = train_images.data
+      testset[I] = test_images.data
+
+      train_labels_image = train_images.label
+      test_labels_image = test_images.label
+
+      trainset[X], testset[X], train_labels_text, test_labels_text = getTextData()
   end
 
   if not pos_pairs then
