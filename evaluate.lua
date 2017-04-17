@@ -11,12 +11,6 @@ function calcAndPrintHammingAccuracy(trainBatch, similarity_target, statsFile)
         numCorrect = torch.eq(similarity, similarity_target):sum()
         statsPrint(string.format("Accuracy%d = %.2f", i, numCorrect*100 / s), statsFile)
     end
-
-    -- similarity = torch.eq(imHash, teHash):sum(2):eq(L)
-    -- numCorrect = torch.eq(similarity, similarity_target):sum()
-    -- accuracy = numCorrect / similarity:size(1)
-
-    -- print("Accuracy: " .. accuracy * 100)
 end
 
 function getQueryAndDBCodes(fromModality, toModality)
@@ -69,11 +63,6 @@ function getDistanceAndSimilarityForMAP(queryCodes, databaseCodes, queryLabels, 
 
         queryLabelRep = torch.expand(queryLabels[q]:reshape(24,1), 24, numDB):transpose(1,2)
         S[q] = torch.cmul(queryLabelRep, databaseLabels):max(2)
-
-        -- for d = 1,numDB do
-        --     S[q][d] = torch.dot(queryLabels[q], databaseLabels[d])
-        -- end
-        -- S = S:clamp(0,1)
     end
 
     return D, S
@@ -132,13 +121,14 @@ function getHashCodes(data)
     return computeInBatches(calcHashCodes, torch.CudaLongTensor(data:size(1), L), data, nil)
 end
 
-function calcRoundedOutput(data)
+function calcRoundedOutput(data) 
+    -- This function requires a global variable called "imageClassifier" or "textClassifier"
+
     if data:size(2) == 3 then -- Image modality
         return imageClassifier:cuda():forward(data:cuda()):round()
     else -- Text modality
         return textClassifier:cuda():forward(data:cuda()):round()
     end
-    -- return classifier:forward(data:cuda()):round()
 end
 
 function calcHashCodes(data)
@@ -174,15 +164,7 @@ function computeInBatches(computeFunction, output, data)
     end
 end
 
-function calcClassAccuracy(modality)
-
-    if modality == I then
-        data = trainset[I]:index(1, trainImages)
-        labels = train_labels_image:float():index(1, trainImages):cuda() -- TODO: is float() necessary?
-    else
-        data = trainset[X]:index(1, trainTexts)
-        labels = train_labels_text:float():index(1, trainTexts):cuda()
-    end
+function calcClassAccuracy(data, labels)
 
     roundedOutput = computeInBatches(calcRoundedOutput, torch.CudaTensor(data:size(1), 24), data)
 
@@ -198,21 +180,15 @@ function calcClassAccuracy(modality)
     return accuracy
 end
 
-function calcBatchClassAccuracy(classifier, trainBatch, modality)
-
-    roundedOutput = classifier:forward(trainBatch.data[modality]):round()
-    labels = trainBatch.labels[modality]
-
-    numInstances = roundedOutput:size(1)
-    dotProd = torch.CudaTensor(numInstances)
-    for i = 1, numInstances do
-        dotProd[i] = torch.dot(roundedOutput[i], labels[i])
+function calcClassAccuracyForModality(modality)
+    if modality == I then
+        data = trainset[I]:index(1, trainImages)
+        labels = train_labels_image:float():index(1, trainImages):cuda() -- TODO: is float() necessary?
+    else
+        data = trainset[X]:index(1, trainTexts)
+        labels = train_labels_text:float():index(1, trainTexts):cuda()
     end
-    zero = torch.zeros(numInstances):cuda()
-    numCorrect = dotProd:gt(zero):sum()
-    accuracy = numCorrect * 100 / numInstances
-    
-    return accuracy
+    return calcClassAccuracy(data, labels)
 end
 
 function statsPrint(line, statsFile1, statsFile2)

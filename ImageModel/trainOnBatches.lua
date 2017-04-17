@@ -18,7 +18,6 @@ dataPath = '/home/kjoslyn/torch/test/data/mirflickr/' -- server
 infoPath = '/home/kjoslyn/kevin/' -- server
 -- infoPath = '../../kevin/' -- labcomp
 
-
 function calcClassAccuracyOnTrainset(classifier)
 
     roundedOutput = calcRoundedOutputInBatches(classifier, torch.CudaTensor(trainset.data:size(1), 24), trainset.data)
@@ -72,12 +71,6 @@ function getBatch(batchNum, batchSize, perm)
 end
 
 function loadData(small)
-    -- trainLabels = matio.load(infoPath .. 'mirflickrLabelTr.mat')
-    -- testLabels = matio.load(infoPath .. 'mirflickrLabelTe.mat')
-
-    -- allLabels = matio.load(infoPath .. 'mirflickrLabelTr.mat') -- load from mat file
-    -- train_labels = torch.load(infoPath .. 'mirflickrLabelTr.t7') -- load from t7 file
-    -- test_labels = torch.load(infoPath .. 'mirflickrLabelTe.t7') -- load from t7 file
 
     batchSize = 128
 
@@ -89,18 +82,6 @@ function loadData(small)
         trainset = torch.load('mirflickr_trainset.t7')
     end
     Ntrain = trainset.data:size(1)
-    -- train_file = io.open(infoPath .. 'mirflickr_train.txt', 'r')
-    -- train_images = {}
-    -- trainset = {}
-    -- trainset.data = torch.FloatTensor(Ntrain, 3, 227, 227)
-    -- trainset.label = torch.FloatTensor(Ntrain, 24)
-    -- for i=1,Ntrain do
-    --     train_images[i] = train_file:read("*line"):gsub("%s+", "")
-    --     local im = image.load(dataPath .. train_images[i])
-    --     trainset.data[i] = image.scale(torch.DoubleTensor(3,227,227), im)
-    --     trainset.label[i] = train_labels.L_tr[i]
-    -- end
-    -- torch.save('mirflickr_trainset_small.t7', trainset)
 
     print('Loading test images')
     if small then
@@ -109,18 +90,6 @@ function loadData(small)
         testset = torch.load('mirflickr_testset.t7')
     end
     Ntest = testset.data:size(1)
-    -- test_file = io.open(infoPath .. 'mirflickr_test.txt', 'r')
-    -- test_images = {}
-    -- testset = {}
-    -- testset.data = torch.FloatTensor(Ntest, 3, 227, 227)
-    -- testset.label = torch.FloatTensor(Ntest, 24)
-    -- for i=1,Ntest do
-    --     test_images[i] = test_file:read("*line"):gsub("%s+", "")
-    --     local im = image.load(dataPath .. test_images[i])
-    --     testset.data[i] = image.scale(torch.DoubleTensor(3,227,227), im)
-    --     testset.label[i] = test_labels.L_te[i]
-    -- end
-    -- torch.save('mirflickr_testset_small.t7', testset)
 
     setmetatable(trainset, 
         {__index = function(t, i) 
@@ -255,51 +224,3 @@ function trainAndEvaluate(numEpochs, startEpoch)
         model:training()
     end
 end
-
---[[
-model:evaluate()
-
-print('Actual')
-print(testset.label[1])
-
-predicted = model:forward(testset.data)
--- predicted = model:forward(testset.data[1])
-print('Predicted')
-print(predicted[1])
-
-labels = {'animals',
-            'baby',
-            'bird',
-            'car',
-            'clouds',
-            'dog',
-            'female',
-            'flower',
-            'food',
-            'indoor',
-            'lake',
-            'male',
-            'night',
-            'people',
-            'plant_life',
-            'portrait',
-            'river',
-            'sea',
-            'sky',
-            'structures',
-            'sunset',
-            'transport',
-            'tree',
-            'water'
-            }
-
-conf = optim.ConfusionMatrix(labels)
-
-conf:zero()
-
-conf:batchAdd(predicted, testset.label)
-
-print(conf)
--- image.display(conf:render())
-
---]]

@@ -54,7 +54,7 @@ function loadModelAndData()
   hashLayerSize = L * k
   baseLearningRate = 1e-6
   baseWeightDecay = 0
-  lrMultForHashLayer = 1e5 -- 1e4, 1e5, etc
+  lrMultForHashLayer = 1e3 -- 1e4, 1e5, etc
   posExamplesPerBatch = 20
   negExamplesPerBatch = 100
 
@@ -241,11 +241,11 @@ function trainAndEvaluate()
           textToImageMAP = calcMAP(X, I, nil)
           imageToTextMAP = calcMAP(I, X, nil)
 
-          imageAccuracy = calcClassAccuracy(I)
-          textAccuracy = calcClassAccuracy(X)
+          imageAccuracy = calcClassAccuracyForModality(I)
+          textAccuracy = calcClassAccuracyForModality(X)
 
-          batchTextClassAcc = calcBatchClassAccuracy(textClassifier, trainBatch, X)
-          batchImageClassAcc = calcBatchClassAccuracy(imageClassifier, trainBatch, I)-- TODO: This is not very useful because it is only for the last batch in the epoch
+          batchTextClassAcc = calcClassAccuracy(trainBatch.data[X], trainBatch.label[X])
+          batchImageClassAcc = calcClassAccuracy(trainBatch.data[I], trainBatch.label[I])-- TODO: This is not very useful because it is only for the last batch in the epoch
 
           statsPrint("=====Epoch " .. epoch, sf, sfv)
           calcAndPrintHammingAccuracy(trainBatch, batch_sim_label, sfv) -- TODO: This is not very useful because it is only for the last batch in the epoch
