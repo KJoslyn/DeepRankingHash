@@ -19,11 +19,11 @@ function loadCustomPackages()
   package.loaded.dataLoader = nil
   package.loaded.batchLoader = nil
   package.loaded.createModel = nil
-  require 'pickSubset'
+  require 'auxf.pickSubset'
   require 'auxf.evaluate'
   require 'auxf.dataLoader'
-  require 'batchLoader'
-  require 'createModel'
+  require 'auxf.batchLoader'
+  require 'auxf.createModel'
 end
 
 function loadModelSnapshot()

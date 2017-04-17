@@ -1,4 +1,3 @@
---TODO: Rename model to imageClassifier and remove calcClassAccuracy functions
 --TODO: Remove data loader methods and use aux methods
 
 require 'nn'
@@ -6,6 +5,8 @@ require 'loadcaffe' -- doesn't work on server
 require 'image'
 require 'optim'
 nninit = require 'nninit'
+require 'auxf.evaluate'
+require 'auxf.dataLoader'
 
 GPU = true
 if (GPU) then
@@ -18,40 +19,12 @@ matio = require 'matio'
 
 dataPath = '/home/kjoslyn/torch/test/data/mirflickr/' -- server
 -- dataPath = '../../Datasets/mirflickr/' -- labcomp
-infoPath = '/home/kjoslyn/kevin/' -- server
--- infoPath = '../../kevin/' -- labcomp
-
-function calcClassAccuracyOnTrainset(classifier)
-
-    roundedOutput = calcRoundedOutputInBatches(classifier, torch.CudaTensor(trainset.data:size(1), 24), trainset.data)
-    dotProd = torch.CudaTensor(Ntrain)
-    for i = 1, Ntrain do
-        dotProd[i] = torch.dot(roundedOutput[i]:float(), trainset.label[i])
-    end
-    zero = torch.zeros(Ntrain):cuda()
-    numCorrect = dotProd:gt(zero):sum()
-    accuracy = numCorrect * 100 / Ntrain
-    return accuracy
-end
-
-function calcRoundedOutputInBatches(classifier, output, data) 
-
-    N = data:size(1)
-    local batchSize = 128
-    local numBatches = torch.ceil(N / batchSize)
-    for b = 0, numBatches - 1 do
-        startIndex = b * batchSize + 1
-        endIndex = math.min((b + 1) * batchSize, N)
-        batch = data[{{ startIndex, endIndex }}]
-        output[{{ startIndex, endIndex}}] = classifier:cuda():forward(batch:cuda()):round()
-    end
-    return output    
-end
+filePath = '/home/kjoslyn/kevin/' -- server
 
 function getBatch(batchNum, batchSize, perm)
 
     startIndex = batchNum * batchSize + 1
-    endIndex = math.min((batchNum + 1) * batchSize, trainset:size())
+    endIndex = math.min((batchNum + 1) * batchSize, Ntrain)
 
     batchPerm = perm[ {{ startIndex, endIndex }} ]
     batch = {}
@@ -75,53 +48,14 @@ end
 
 function loadData(small)
 
-    batchSize = 128
-
-    print('Loading training images')
-    if small then
-        print('**** Warning: small = true')
-        trainset = torch.load('mirflickr_trainset_small.t7')
-    else
-        trainset = torch.load('mirflickr_trainset.t7')
-    end
+    trainset, testset = getImageData(small)
     Ntrain = trainset.data:size(1)
-
-    print('Loading test images')
-    if small then
-        testset = torch.load('mirflickr_testset_small.t7')
-    else
-        testset = torch.load('mirflickr_testset.t7')
-    end
     Ntest = testset.data:size(1)
-
-    setmetatable(trainset, 
-        {__index = function(t, i) 
-                        return {t.data[i], t.label[i]} 
-                    end}
-    );
-
-    function trainset:size() 
-        return self.data:size(1) 
-    end
-
-    mean = {} -- store the mean, to normalize the test set in the future
-    stdv  = {} -- store the standard-deviation for the future
-    for i=1,3 do -- over each image channel
-        mean[i] = trainset.data[{ {}, {i}, {}, {}  }]:mean() -- mean estimation
-        trainset.data[{ {}, {i}, {}, {}  }]:add(-mean[i]) -- mean subtraction
-        testset.data[{ {}, {i}, {}, {}  }]:add(-mean[i]) -- mean subtraction
-
-        stdv[i] = trainset.data[{ {}, {i}, {}, {}  }]:std() -- std estimation
-        trainset.data[{ {}, {i}, {}, {}  }]:div(stdv[i]) -- std scaling
-        testset.data[{ {}, {i}, {}, {}  }]:div(stdv[i]) -- std scaling
-    end
-
-    -- trainset, testset = loadImageData(small)
 end
 
 function loadModel()
     -- caffemodel = loadcaffe.load('trainnet.prototxt', 'snapshot_iter_16000.caffemodel', 'cudnn')
-    model = nn.Sequential()
+    local model = nn.Sequential()
 
     model:add(cudnn.SpatialConvolution(3,96, 11, 11, 4, 4, 0, 0, 1):init('weight', nninit.xavier, {dist = 'normal', gain = 'relu'}))
     model:add(cudnn.ReLU(true))
@@ -148,6 +82,8 @@ function loadModel()
     model:add(nn.Linear(4096, 24):init('weight', nninit.xavier, {dist = 'normal', gain = 'sigmoid'}))
 
     model:add(nn.Sigmoid())
+
+    imageClassifier = model -- Need this global variable for "calcRoundedOutput" function in auxf/evaluate.lua
 end
 
 function trainAndEvaluate(numEpochs, startEpoch)
@@ -159,10 +95,10 @@ function trainAndEvaluate(numEpochs, startEpoch)
         criterion = criterion:cuda()
         testset.data = testset.data:cuda()
         testset.label = testset.label:cuda()
-        model:cuda()
+        imageClassifier:cuda()
     end
 
-    params, gradParams = model:getParameters()
+    params, gradParams = imageClassifier:getParameters()
 
     local optimState = {
         learningRate = .01
@@ -177,7 +113,7 @@ function trainAndEvaluate(numEpochs, startEpoch)
 
     numBatches = math.ceil(Ntrain / batchSize)
 
-    model:training()
+    imageClassifier:training()
 
     if not startEpoch then
         startEpoch = 1
@@ -201,7 +137,7 @@ function trainAndEvaluate(numEpochs, startEpoch)
 
                 gradParams:zero()
 
-                local outputs = model:forward(trainBatch.data)
+                local outputs = imageClassifier:forward(trainBatch.data)
                 local loss = criterion:forward(outputs, trainBatch.label)
 
                 totalLoss = totalLoss + loss
@@ -210,7 +146,7 @@ function trainAndEvaluate(numEpochs, startEpoch)
                 -- local numOnes = roundedOutput:sum()
 
                 local dloss_doutputs = criterion:backward(outputs, trainBatch.label)
-                model:backward(trainBatch.data, dloss_doutputs)
+                imageClassifier:backward(trainBatch.data, dloss_doutputs)
 
                 return loss, gradParams
             end
@@ -219,13 +155,13 @@ function trainAndEvaluate(numEpochs, startEpoch)
             -- collectgarbage()
         end
 
-        model:evaluate()
+        imageClassifier:evaluate()
         avgLoss = totalLoss / numBatches
         print("Epoch " .. epoch .. ": avg loss = " .. avgLoss)
         avgNumIncorrect = totNumIncorrect / Ntrain
         print("Epoch " .. epoch .. ": avg num incorrect = " .. avgNumIncorrect)
-        classAcc = calcClassAccuracyOnTrainset(model)
+        classAcc = calcClassAccuracy(trainset.data, trainset.label:cuda())
         print(string.format("Epoch %d: Trainset class accuracy = %.2f\n", epoch, classAcc))
-        model:training()
+        imageClassifier:training()
     end
 end
