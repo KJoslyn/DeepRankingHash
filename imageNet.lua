@@ -20,16 +20,22 @@ matio = require 'matio'
 dataPath = '/home/kjoslyn/torch/test/data/mirflickr/' -- server
 -- dataPath = '../../Datasets/mirflickr/' -- labcomp
 filePath = '/home/kjoslyn/kevin/' -- server
+snapshotDir = '/home/kjoslyn/kevin/Project/snapshots/imageNet'
 
-function getBatch(batchNum, batchSize, perm)
+function getBatch(kFoldNum, batchNum, batchSize, perm)
 
     startIndex = batchNum * batchSize + 1
     endIndex = math.min((batchNum + 1) * batchSize, Ntrain)
 
     batchPerm = perm[ {{ startIndex, endIndex }} ]
     batch = {}
-    batch.data = trainset.data:index(1, batchPerm)
-    batch.label = trainset.label:index(1, batchPerm)
+    if kFoldNum == -1 then
+        batch.data = trainset.data:index(1, batchPerm)
+        batch.label = trainset.label:index(1, batchPerm)
+    else
+        batch.data = KFoldTrainSet[kFoldNum].data:index(1, batchPerm)
+        batch.label = KFoldTrainSet[kFoldNum].label:index(1, batchPerm)
+    end
     batch.data = batch.data:cuda()
     batch.label = batch.label:cuda()
 
@@ -49,8 +55,45 @@ end
 function loadData(small)
 
     trainset, testset = getImageData(small)
-    Ntrain = trainset.data:size(1)
+    totTrain = trainset.data:size(1)
     Ntest = testset.data:size(1)
+    KFoldTrainSet, KFoldValSet = getKFoldSplit(trainset, 5)
+end
+
+function getKFoldSplit(trainset, K)
+
+    local sizeVal = math.ceil(totTrain / K)
+
+    KFoldTrainSet = {}
+    KFoldValSet = {}
+
+    for k = 1,K do
+        valStartIdx = (k-1) * sizeVal + 1
+        valEndIdx = math.min(k * sizeVal, totTrain)
+
+        KFoldTrainSet[k] = {}
+        KFoldValSet[k] = {}
+
+        KFoldValSet[k].data = trainset.data[ {{ valStartIdx, valEndIdx }} ]
+        KFoldValSet[k].label = trainset.label[ {{ valStartIdx, valEndIdx }} ]
+
+        sizeTrain = totTrain - KFoldValSet[k].data:size(1)
+        KFoldTrainSet[k].data = torch.FloatTensor(sizeTrain, 3, 227, 227)
+        KFoldTrainSet[k].label = torch.LongTensor(sizeTrain, 24)
+
+        local markerIdx = 1
+        if valStartIdx ~= 1 then
+            KFoldTrainSet[k].data[ {{ 1, valStartIdx - 1 }} ] = trainset.data[ {{ 1, valStartIdx - 1 }} ]
+            KFoldTrainSet[k].label[ {{ 1, valStartIdx - 1 }} ] = trainset.label[ {{ 1, valStartIdx - 1 }} ]
+            markerIdx = valStartIdx
+        end 
+        if valEndIdx ~= totTrain then
+            KFoldTrainSet[k].data[ {{ markerIdx, sizeTrain }} ] = trainset.data[ {{ valEndIdx + 1, totTrain }} ]
+            KFoldTrainSet[k].label[ {{ markerIdx, sizeTrain }} ] = trainset.label[ {{ valEndIdx + 1, totTrain }} ]
+        end 
+    end
+
+    return KFoldTrainSet, KFoldValSet
 end
 
 function loadModel()
@@ -86,7 +129,10 @@ function loadModel()
     imageClassifier = model -- Need this global variable for "calcRoundedOutput" function in auxf/evaluate.lua
 end
 
-function trainAndEvaluate(numEpochs, startEpoch)
+function trainAndEvaluate(kFoldNum, numEpochs, startEpoch)
+    -- kFoldNum is the number of the validation set that will be used for training in this run
+    -- use -1 for no validation set
+
     -- criterion = nn.MultiLabelSoftMarginCriterion()
     -- criterion = nn.MSECriterion()
     criterion = nn.BCECriterion()
@@ -111,6 +157,13 @@ function trainAndEvaluate(numEpochs, startEpoch)
 
     batchSize = 128
 
+    if kFoldNum == -1 then
+        Nval = 0
+    else
+        Nval = KFoldValSet[kFoldNum].data:size(1)
+    end
+    Ntrain = totTrain - Nval 
+
     numBatches = math.ceil(Ntrain / batchSize)
 
     imageClassifier:training()
@@ -127,7 +180,7 @@ function trainAndEvaluate(numEpochs, startEpoch)
 
         for batchNum = 0, numBatches - 1 do
 
-            trainBatch = getBatch(batchNum, batchSize, perm)
+            trainBatch = getBatch(kFoldNum, batchNum, batchSize, perm)
 
             function feval(x)
                 -- get new parameters
@@ -160,8 +213,19 @@ function trainAndEvaluate(numEpochs, startEpoch)
         print("Epoch " .. epoch .. ": avg loss = " .. avgLoss)
         avgNumIncorrect = totNumIncorrect / Ntrain
         print("Epoch " .. epoch .. ": avg num incorrect = " .. avgNumIncorrect)
-        classAcc = calcClassAccuracy(trainset.data, trainset.label:cuda())
-        print(string.format("Epoch %d: Trainset class accuracy = %.2f\n", epoch, classAcc))
+        if kFoldNum ~= -1 then
+            classAcc = calcClassAccuracy(KFoldValSet[kFoldNum].data, KFoldValSet[kFoldNum].label:cuda())
+            print(string.format("Epoch %d: Val set class accuracy = %.2f\n", epoch, classAcc))
+        end
         imageClassifier:training()
+
+        if epoch == 500 or epoch == 750 or epoch == 900 or epoch == 1000 then
+            local paramsToSave, gp = imageClassifier:getParameters()
+            local snapshotFile = snapshotDir .. "/snapshot_epoch_" .. epoch .. ".t7" 
+            local snapshot = {}
+            snapshot.params = paramsToSave
+            snapshot.gparams = gp
+            torch.save(snapshotFile, snapshot)
+        end
     end
 end
