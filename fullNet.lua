@@ -1,4 +1,12 @@
 
+-- //////////////////////////////////////////
+-- Typical flow:
+-- require 'fullNet'
+-- loadModelAndData()
+-- optional: loadModelSnapshot() -- createModel.lua
+-- trainAndEvaluate()
+-- /////////////////////////////////////////
+
 function loadStandardPackages() 
 
   require 'nn'
@@ -26,28 +34,6 @@ function loadCustomPackages()
   require 'auxf.createModel'
 end
 
-function loadModelSnapshot()
-
-  snapshot2ndLevelDir = 'Lr5e4_5kquery_5kdatabase'
-  snapshotFileName = 'snapshot_epoch_100.t7'
-
-  snapshotFullPath = snapshotDir .. '/' .. snapshot2ndLevelDir .. '/' .. snapshotFileName
-  snapshot = torch.load(snapshotFullPath)
-  N = snapshot.params:size(1)
-
-  params, gparams = model:getParameters()
-
-  batchSize = 1e5
-
-  local numBatches = torch.ceil(N / batchSize)
-  for b = 0, numBatches - 1 do
-      startIndex = b * batchSize + 1
-      endIndex = math.min((b + 1) * batchSize, N)
-      params[ {{ startIndex, endIndex }} ]:copy(snapshot.params[ {{ startIndex, endIndex }} ])
-  end
-
-end
-
 function loadModelAndData() 
 
   if not nn then
@@ -56,6 +42,7 @@ function loadModelAndData()
 
   -- Variable Parameters
   numEpochs = 200 -- 416 is max number without truncating an epoch
+  lrMultForHashLayer = 1e5 -- 1e4, 1e5, etc
   -- posExamplesPerEpoch = 1e4
   -- negExamplesPerEpoch = 5e4
   posExamplesPerEpoch = 20*100
@@ -65,7 +52,6 @@ function loadModelAndData()
   hashLayerSize = L * k
   baseLearningRate = 1e-6
   baseWeightDecay = 0
-  lrMultForHashLayer = 1e3 -- 1e4, 1e5, etc
   posExamplesPerBatch = 20
   negExamplesPerBatch = 100
 
@@ -83,7 +69,7 @@ function loadModelAndData()
   I = 1 -- Table index for image modality
   X = 2 -- Table index for text modality
   filePath = '/home/kjoslyn/kevin/' -- server
-  snapshotDir = '/home/kjoslyn/kevin/FullNet/snapshots'
+  snapshotDir = '/home/kjoslyn/kevin/Project/snapshots'
 
   loadCustomPackages()
 
@@ -97,8 +83,8 @@ function loadModelAndData()
           textHasher = modelData.textHasher
           model = modelData.combinedModel
       else
-          imageClassifier, imageHasher = getImageModel()
-          textClassifier, textHasher = getTextModel()
+          imageClassifier, imageHasher = getImageModelForFullNet()
+          textClassifier, textHasher = getTextModelForFullNet()
           model = createCombinedModel(imageHasher, textHasher)
 
           if saveModelToFile == 1 then

@@ -19,12 +19,51 @@ end
 
 function getImageModel()
 
-    local model = loadcaffe.load(filePath .. 'CNN Model/trainnet.prototxt', filePath .. 'CNN Model/snapshot_iter_16000.caffemodel', 'cudnn')
+    -- local model = loadcaffe.load(filePath .. 'CNN Model/trainnet.prototxt', filePath .. 'CNN Model/snapshot_iter_16000.caffemodel', 'cudnn')
+    local model = nn.Sequential()
 
+    model:add(cudnn.SpatialConvolution(3,96, 11, 11, 4, 4, 0, 0, 1):init('weight', nninit.xavier, {dist = 'normal', gain = 'relu'}))
+    model:add(cudnn.ReLU(true))
+    model:add(cudnn.SpatialMaxPooling(3, 3, 2, 2, 0, 0):ceil())
+    model:add(cudnn.SpatialCrossMapLRN(5, 0.000100, 0.7500, 1.000000))
+    model:add(cudnn.SpatialConvolution(96, 256, 5, 5, 1, 1, 2, 2, 2):init('weight', nninit.xavier, {dist = 'normal', gain = 'relu'}))
+    model:add(cudnn.ReLU(true))
+    model:add(cudnn.SpatialMaxPooling(3, 3, 2, 2, 0, 0):ceil())
+    model:add(cudnn.SpatialCrossMapLRN(5, 0.000100, 0.7500, 1.000000))
+    model:add(cudnn.SpatialConvolution(256, 384, 3, 3, 1, 1, 1, 1, 1):init('weight', nninit.xavier, {dist = 'normal', gain = 'relu'}))
+    model:add(cudnn.ReLU(true))
+    model:add(cudnn.SpatialConvolution(384, 384, 3, 3, 1, 1, 1, 1, 2):init('weight', nninit.xavier, {dist = 'normal', gain = 'relu'}))
+    model:add(cudnn.ReLU(true))
+    model:add(cudnn.SpatialConvolution(384, 256, 3, 3, 1, 1, 1, 1, 2):init('weight', nninit.xavier, {dist = 'normal', gain = 'relu'}))
+    model:add(cudnn.ReLU(true))
+    model:add(cudnn.SpatialMaxPooling(3, 3, 2, 2, 0, 0):ceil())
+    model:add(nn.View(-1):setNumInputDims(3))
+    model:add(nn.Linear(9216, 4096):init('weight', nninit.xavier, {dist = 'normal', gain = 'relu'}))
+    model:add(cudnn.ReLU(true))
+    model:add(nn.Dropout(0.500000))
+    model:add(nn.Linear(4096, 4096):init('weight', nninit.xavier, {dist = 'normal', gain = 'relu'}))
+    model:add(cudnn.ReLU(true))
+    model:add(nn.Dropout(0.500000))
+    model:add(nn.Linear(4096, 24):init('weight', nninit.xavier, {dist = 'normal', gain = 'sigmoid'}))
+
+    model:add(nn.Sigmoid())
+
+    return model
+end
+
+function getImageModelForFullNet()
+
+    local model = getImageModel()
+
+    local snapshot2ndLevelDir = 'imageNet'
+    local snapshotFile = 'snapshot_epoch_500.t7'
+    loadModelSnapshot(model, snapshot2ndLevelDir, snapshotFile)
+
+    model.modules[#model.modules] = nil -- This is messy, but need to remove sigmoid layer for now. Will add it back later.
     return createClassifierAndHasher(model, 4096)
 end
 
-function getTextModel()
+function getTextModelForFullNet()
 
     local model = loadcaffe.load(filePath .. 'text model/tag_trainnet.prototxt', filePath .. 'text model/snapshot_iter_200.caffemodel', 'cudnn')
 
@@ -113,4 +152,33 @@ function getCriterion()
     criterion.sizeAverage = false
     criterion = criterion:cuda()
     return criterion
+end
+
+function loadModelSnapshot(model, snapshot2ndLevelDir, snapshotFileName)
+
+
+  -- If these aren't specified, use hardcoded values
+  if not snapshot2ndLevelDir and snapshotFileName then
+    -- local snapshot2ndLevelDir = 'Lr5e4_5kquery_5kdatabase'
+    local snapshot2ndLevelDir = 'imageNet'
+    local snapshotFileName = 'snapshot_epoch_500.t7'
+  end
+
+  print('****Loading snapshot: ' .. snapshot2ndLevelDir .. '/' .. snapshotFileName)
+
+  snapshotFullPath = snapshotDir .. '/' .. snapshot2ndLevelDir .. '/' .. snapshotFileName
+  snapshot = torch.load(snapshotFullPath)
+  N = snapshot.params:size(1)
+
+  params, gparams = model:getParameters()
+
+  batchSize = 1e5
+
+  local numBatches = torch.ceil(N / batchSize)
+  for b = 0, numBatches - 1 do
+      startIndex = b * batchSize + 1
+      endIndex = math.min((b + 1) * batchSize, N)
+      params[ {{ startIndex, endIndex }} ]:copy(snapshot.params[ {{ startIndex, endIndex }} ])
+  end
+
 end

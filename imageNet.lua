@@ -1,4 +1,11 @@
---TODO: Remove data loader methods and use aux methods
+
+-- //////////////////////////////////////////
+-- Typical flow:
+-- require 'imageNet'
+-- loadData() -- uses dataLoader.lua. 1 input parameter- true for 1000 instanes (small)
+-- optional: loadModelSnapshot -- from createModel.lua
+-- trainAndEvaluate()
+-- /////////////////////////////////////////
 
 require 'nn'
 require 'loadcaffe' -- doesn't work on server
@@ -7,6 +14,7 @@ require 'optim'
 nninit = require 'nninit'
 require 'auxf.evaluate'
 require 'auxf.dataLoader'
+require 'auxf.createModel'
 
 GPU = true
 if (GPU) then
@@ -20,7 +28,10 @@ matio = require 'matio'
 dataPath = '/home/kjoslyn/torch/test/data/mirflickr/' -- server
 -- dataPath = '../../Datasets/mirflickr/' -- labcomp
 filePath = '/home/kjoslyn/kevin/' -- server
-snapshotDir = '/home/kjoslyn/kevin/Project/snapshots/imageNet'
+snapshotDir = '/home/kjoslyn/kevin/Project/snapshots'
+
+-- //////////// Load image model
+imageClassifier = getImageModel()
 
 function getBatch(kFoldNum, batchNum, batchSize, perm)
 
@@ -94,39 +105,6 @@ function getKFoldSplit(trainset, K)
     end
 
     return KFoldTrainSet, KFoldValSet
-end
-
-function loadModel()
-    -- caffemodel = loadcaffe.load('trainnet.prototxt', 'snapshot_iter_16000.caffemodel', 'cudnn')
-    local model = nn.Sequential()
-
-    model:add(cudnn.SpatialConvolution(3,96, 11, 11, 4, 4, 0, 0, 1):init('weight', nninit.xavier, {dist = 'normal', gain = 'relu'}))
-    model:add(cudnn.ReLU(true))
-    model:add(cudnn.SpatialMaxPooling(3, 3, 2, 2, 0, 0):ceil())
-    model:add(cudnn.SpatialCrossMapLRN(5, 0.000100, 0.7500, 1.000000))
-    model:add(cudnn.SpatialConvolution(96, 256, 5, 5, 1, 1, 2, 2, 2):init('weight', nninit.xavier, {dist = 'normal', gain = 'relu'}))
-    model:add(cudnn.ReLU(true))
-    model:add(cudnn.SpatialMaxPooling(3, 3, 2, 2, 0, 0):ceil())
-    model:add(cudnn.SpatialCrossMapLRN(5, 0.000100, 0.7500, 1.000000))
-    model:add(cudnn.SpatialConvolution(256, 384, 3, 3, 1, 1, 1, 1, 1):init('weight', nninit.xavier, {dist = 'normal', gain = 'relu'}))
-    model:add(cudnn.ReLU(true))
-    model:add(cudnn.SpatialConvolution(384, 384, 3, 3, 1, 1, 1, 1, 2):init('weight', nninit.xavier, {dist = 'normal', gain = 'relu'}))
-    model:add(cudnn.ReLU(true))
-    model:add(cudnn.SpatialConvolution(384, 256, 3, 3, 1, 1, 1, 1, 2):init('weight', nninit.xavier, {dist = 'normal', gain = 'relu'}))
-    model:add(cudnn.ReLU(true))
-    model:add(cudnn.SpatialMaxPooling(3, 3, 2, 2, 0, 0):ceil())
-    model:add(nn.View(-1):setNumInputDims(3))
-    model:add(nn.Linear(9216, 4096):init('weight', nninit.xavier, {dist = 'normal', gain = 'relu'}))
-    model:add(cudnn.ReLU(true))
-    model:add(nn.Dropout(0.500000))
-    model:add(nn.Linear(4096, 4096):init('weight', nninit.xavier, {dist = 'normal', gain = 'relu'}))
-    model:add(cudnn.ReLU(true))
-    model:add(nn.Dropout(0.500000))
-    model:add(nn.Linear(4096, 24):init('weight', nninit.xavier, {dist = 'normal', gain = 'sigmoid'}))
-
-    model:add(nn.Sigmoid())
-
-    imageClassifier = model -- Need this global variable for "calcRoundedOutput" function in auxf/evaluate.lua
 end
 
 function trainAndEvaluate(kFoldNum, numEpochs, startEpoch)
@@ -221,7 +199,7 @@ function trainAndEvaluate(kFoldNum, numEpochs, startEpoch)
 
         if epoch == 500 or epoch == 750 or epoch == 900 or epoch == 1000 then
             local paramsToSave, gp = imageClassifier:getParameters()
-            local snapshotFile = snapshotDir .. "/snapshot_epoch_" .. epoch .. ".t7" 
+            local snapshotFile = snapshotDir .. "/imageNet/snapshot_epoch_" .. epoch .. ".t7" 
             local snapshot = {}
             snapshot.params = paramsToSave
             snapshot.gparams = gp
