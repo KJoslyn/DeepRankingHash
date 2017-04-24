@@ -1,8 +1,18 @@
 local nninit = require 'nninit'
 
-function getSoftMaxLayer()
+function getHashLayerFullyConnected(prevLayerSize, hashLayerSize, lrMultForHashLayer, addHiddenLayer)
 
     local model = nn.Sequential()
+
+    if addHiddenLayer then
+        model:add(nn.Linear(prevLayerSize, prevLayerSize)
+                 :init('weight', nninit.xavier, {dist = 'normal'})
+                 :learningRate('weight', lrMultForHashLayer))
+    end
+
+    model:add(nn.Linear(prevLayerSize, hashLayerSize)
+        :init('weight', nninit.xavier, {dist = 'normal'})
+        :learningRate('weight', lrMultForHashLayer))
 
     model:add(nn.Reshape(L, k)) -- TODO: Change 120 to batchSize or inputSize
     model:add(nn.SplitTable(2))
@@ -15,6 +25,37 @@ function getSoftMaxLayer()
     model:add(nn.JoinTable(2))
 
     return model
+end
+
+function getHashLayerGrouped(prevLayerSize, L, k, lrMultForHashLayer, addHiddenLayer)
+
+    local groupSize = prevLayerSize / L
+
+    local hashLayer = nn.Sequential()
+
+    if addHiddenLayer then
+        hashLayer:add(nn.Linear(prevLayerSize, prevLayerSize)
+                 :init('weight', nninit.xavier, {dist = 'normal'})
+                 :learningRate('weight', lrMultForHashLayer))
+    end
+
+    hashLayer:add(nn.Reshape(L, groupSize))
+    hashLayer:add(nn.SplitTable(2))
+
+    map1 = nn.MapTable()
+    map1:add(nn.Linear(groupSize, k)
+        :init('weight', nninit.xavier, {dist = 'normal'})
+        :learningRate('weight', lrMultForHashLayer))
+
+    map2 = nn.MapTable()
+    map2:add(nn.SoftMax())
+
+    hashLayer:add(map1)
+    hashLayer:add(map2)
+
+    hashLayer:add(nn.JoinTable(2))
+
+    return hashLayer
 end
 
 function getImageModel()
@@ -51,7 +92,7 @@ function getImageModel()
     return model
 end
 
-function getImageModelForFullNet()
+function getImageModelForFullNet(L, k, type, lrMultForHashLayer)
 
     local model = getImageModel()
 
@@ -60,10 +101,10 @@ function getImageModelForFullNet()
     loadModelSnapshot(model, snapshot2ndLevelDir, snapshotFile)
 
     model.modules[#model.modules] = nil -- This is messy, but need to remove sigmoid layer for now. Will add it back later.
-    return createClassifierAndHasher(model, 4096)
+    return createClassifierAndHasher(model, 4096, L, k, type, lrMultForHashLayer)
 end
 
-function getTextModelForFullNet()
+function getTextModelForFullNet(L, k, type, lrMultForHashLayer)
 
     local model = loadcaffe.load(filePath .. 'text model/tag_trainnet.prototxt', filePath .. 'text model/snapshot_iter_200.caffemodel', 'cudnn')
 
@@ -74,7 +115,7 @@ function getTextModelForFullNet()
     end
     model.modules[#model.modules] = nil
 
-    return createClassifierAndHasher(model, 2048)
+    return createClassifierAndHasher(model, 2048, L, k, type, lrMultForHashLayer)
 end
 
 function getTextModel2()
@@ -99,7 +140,7 @@ function getImageModel2()
 end
 
 
-function createClassifierAndHasher(model, prevLayerSize)
+function createClassifierAndHasher(model, prevLayerSize, L, k, type, lrMultForHashLayer)
 
     -- Grab classification layer and remove it
     local classLayer = nn.Sequential()
@@ -107,11 +148,18 @@ function createClassifierAndHasher(model, prevLayerSize)
     classLayer:add(nn.Sigmoid())
     model.modules[#model.modules] = nil
 
-    local hashLayer = nn.Sequential()
-    hashLayer:add(nn.Linear(prevLayerSize, hashLayerSize)
-        :init('weight', nninit.xavier, {dist = 'normal'})
-        :learningRate('weight', lrMultForHashLayer))
-    hashLayer:add(getSoftMaxLayer())
+    local hashLayer
+    if type == 'hfc' then
+        hashLayer = getHashLayerFullyConnected(prevLayerSize, L*k, lrMultForHashLayer, true) 
+    elseif type == 'fc' then
+        hashLayer = getHashLayerFullyConnected(prevLayerSize, L*k, lrMultForHashLayer, false) 
+    elseif type == 'hgr' then
+        hashLayer = getHashLayerGrouped(prevLayerSize, L, k, lrMultForHashLayer, true)
+    elseif type == 'gr' then
+        hashLayer = getHashLayerGrouped(prevLayerSize, L, k, lrMultForHashLayer, false)
+    else
+        print('ERROR: Unrecognized hash layer type')
+    end
 
     local concat = nn.ConcatTable()
     concat:add(classLayer)
@@ -182,3 +230,4 @@ function loadModelSnapshot(model, snapshot2ndLevelDir, snapshotFileName)
   end
 
 end
+

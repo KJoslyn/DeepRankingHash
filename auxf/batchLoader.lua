@@ -11,15 +11,15 @@ function getBatch(pos_pairs, neg_pairs, p_size, n_size)
 
     batch = {}
     batch.data = {}
-    batch.labels = {}
+    batch.label = {}
     batch.data[I] = trainset[I]:index(1, batchIdxInTrainset:select(2,1)) -- TODO: Fix long conversion in root pos_pairs and neg_pairs
     batch.data[X] = trainset[X]:index(1, batchIdxInTrainset:select(2,2))
     batch.data[I] = batch.data[I]:cuda()
     batch.data[X] = batch.data[X]:cuda()
-    batch.labels[I] = train_labels_image:index(1, batchIdxInTrainset:select(2,1))
-    batch.labels[X] = train_labels_text:index(1, batchIdxInTrainset:select(2,2))
-    batch.labels[I] = batch.labels[I]:cuda()
-    batch.labels[X] = batch.labels[X]:cuda()
+    batch.label[I] = train_labels_image:index(1, batchIdxInTrainset:select(2,1))
+    batch.label[X] = train_labels_text:index(1, batchIdxInTrainset:select(2,2))
+    batch.label[I] = batch.label[I]:cuda()
+    batch.label[X] = batch.label[X]:cuda()
 
     return batch
 end

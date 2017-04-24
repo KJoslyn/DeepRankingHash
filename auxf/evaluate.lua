@@ -1,8 +1,8 @@
 
 function calcAndPrintHammingAccuracy(trainBatch, similarity_target, statsFile)
 
-    imHash = getHashCodes(trainBatch.data[I], I)
-    teHash = getHashCodes(trainBatch.data[X], X)
+    imHash = getHashCodes(trainBatch.data[I])
+    teHash = getHashCodes(trainBatch.data[X])
 
     s = similarity_target:size(1)
 

@@ -20,29 +20,17 @@ function loadStandardPackages()
 
 end -- end loadPackages()
 
-function loadCustomPackages()
-
-  package.loaded.pickSubset = nil
-  package.loaded.evaluate = nil
-  package.loaded.dataLoader = nil
-  package.loaded.batchLoader = nil
-  package.loaded.createModel = nil
-  require 'auxf.pickSubset'
-  require 'auxf.evaluate'
-  require 'auxf.dataLoader'
-  require 'auxf.batchLoader'
-  require 'auxf.createModel'
-end
-
-function loadModelAndData() 
+function loadParamsAndPackages()
 
   if not nn then
     loadStandardPackages()
   end
 
   -- Variable Parameters
-  numEpochs = 200 -- 416 is max number without truncating an epoch
-  lrMultForHashLayer = 1e5 -- 1e4, 1e5, etc
+  -- numEpochs = 200 -- 416 is max number without truncating an epoch. This is now an input parameter to trainAndEvaluate
+  g_lrMultForHashLayer = 1e4 -- 1e4, 1e5, etc
+  g_modelType = 'gr' -- fully connected b/t class and hash segments
+  -- modelType = 'fc' -- grouped b/t class and hash segments
   -- posExamplesPerEpoch = 1e4
   -- negExamplesPerEpoch = 5e4
   posExamplesPerEpoch = 20*100
@@ -71,36 +59,35 @@ function loadModelAndData()
   filePath = '/home/kjoslyn/kevin/' -- server
   snapshotDir = '/home/kjoslyn/kevin/Project/snapshots'
 
-  loadCustomPackages()
+  package.loaded.pickSubset = nil
+  package.loaded.evaluate = nil
+  package.loaded.dataLoader = nil
+  package.loaded.batchLoader = nil
+  package.loaded.createModel = nil
+  require 'auxf.pickSubset'
+  require 'auxf.evaluate'
+  require 'auxf.dataLoader'
+  require 'auxf.batchLoader'
+  require 'auxf.createModel'
+end
 
-  if not model then
-      if loadModelFromFile == 1 then
-          print('***Loading model from file')
-          modelData = torch.load('modelData.t7')
-          imageClassifier = modelData.imageClassifier
-          imageHasher = modelData.imageHasher
-          textClassifier = modelData.textClassifier
-          textHasher = modelData.textHasher
-          model = modelData.combinedModel
-      else
-          imageClassifier, imageHasher = getImageModelForFullNet()
-          textClassifier, textHasher = getTextModelForFullNet()
-          model = createCombinedModel(imageHasher, textHasher)
+function loadFullModel(modelType, lrMultForHashLayer)
 
-          if saveModelToFile == 1 then
-          print('***Saving model to file')
-          modelData = {}
-          modelData.imageClassifier = imageClassifier
-          modelData.imageHasher = imageHasher
-          modelData.textClassifier = textClassifier
-          modelData.textHasher = textHasher
-          modelData.combinedModel = model
-          torch.save('modelData.t7', modelData)
-          else
-          print('***Skipping save model to file')
-          end
-      end
+  loadParamsAndPackages()
+
+  if not modelType then
+    modelType = g_modelType
   end
+  if not lrMultForHashLayer then
+    lrMultForHashLayer = g_lrMultForHashLayer
+  end
+
+  imageClassifier, imageHasher = getImageModelForFullNet(L, k, modelType, lrMultForHashLayer)
+  textClassifier, textHasher = getTextModelForFullNet(L, k, modelType, lrMultForHashLayer)
+  model = createCombinedModel(imageHasher, textHasher)
+end
+
+function loadData() 
 
   if not trainset then
       trainset = {}
@@ -126,7 +113,7 @@ function loadModelAndData()
 
 end -- end loadModelAndData()
 
-function trainAndEvaluate()
+function trainAndEvaluate(numEpochs)
 
   -- calcMAP(X, I, nil) -- TODO: Remove
   -- calcMAP(I, X, nil) -- TODO: Remove
@@ -184,6 +171,8 @@ function trainAndEvaluate()
 
   model:training()
 
+  -- paramCopy = torch.CudaTensor(params:size())
+
   for epoch = 1, numEpochs  do
 
       epochLoss = 0
@@ -196,9 +185,14 @@ function trainAndEvaluate()
 
           function feval(x)
               -- get new parameters
-              if x ~= params then
-                params:copy(x)
+              if x ~= params then -- TODO: This is never happening
+                params:copy(x) 
               end         
+
+              -- if (torch.eq(params, paramCopy):sum() == params:size(1)) then
+              --   print('Epoch ' .. epoch .. ', Batch ' .. batchNum .. ': params eq paramCopy')
+              -- end
+              -- paramCopy:copy(params)
 
               input = trainBatch.data
               target = batch_label_for_loss
@@ -262,12 +256,14 @@ function trainAndEvaluate()
       end
 
       if epoch % 50 == 0 then
-          local paramsToSave, gp = model:getParameters()
+          -- local paramsToSave, gp = model:getParameters()
           local snapshotFile = snapshotDir .. "/snapshot_epoch_" .. epoch .. ".t7" 
           local snapshot = {}
-          snapshot.params = paramsToSave
+          snapshot.params = params
+          -- snapshot.params = torch.CudaTensor(params:size()):copy(params)
           if epoch % 100 == 0 then
-              snapshot.gparams = gp
+              -- snapshot.gparams = torch.CudaTensor(gradParams:size()):copy(gradParams)
+              snapshot.gparams = gradParams
           end
           torch.save(snapshotFile, snapshot)
       end
