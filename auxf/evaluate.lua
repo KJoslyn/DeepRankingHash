@@ -13,31 +13,47 @@ function calcAndPrintHammingAccuracy(trainBatch, similarity_target, statsFile)
     end
 end
 
-function getQueryAndDBCodes(fromModality, toModality)
+function getQueryAndDBCodes(fromModality, toModality, trainOrVal)
 
-    local numQueries = 5000
-    local numDatabase = 5000
+    -- local numQueries = 5000
+    -- local numDatabase = 5000
+
+    local endIdx = nil
+    local imageIdxSet = nil
+    local textIdxSet = nil
+
+    -- trainImages, trainTexts, valImages, and valTexts come from pickSubset.lua. They are the indices of the images and texts that are
+    -- used in training or validation respectively. They index trainset[modality]. Only 5000 images and 5000 texts are used for training,
+    -- and 1000 images and 1000 texts are used for validation.
+    if trainOrVal == 'train' then
+        endIdx = 5000
+        imageIdxSet = trainImages
+        textIdxSet = trainTexts
+    elseif trainOrVal == 'val' then
+        endIdx = 1000
+        imageIdxSet = valImages
+        textIdxSet = valTexts
+    else
+        print("Error: input to getQueryAndDBCodes must be \'train\' or \'val\'")
+    end
+
+    images = imageIdxSet[ {{ 1, endIdx }} ]:long()
+    texts = textIdxSet[ {{ 1, endIdx }} ]:long()
 
     if fromModality == I then
-        -- trainImages and trainTexts come from pickSubset.lua. They are the indices of the images and texts that are
-        -- used in training. They index trainset[modality]. Only 5000 images and 5000 texts are used for training.
-        images = trainImages[ {{ 1, numQueries }} ]:long()
-        texts = trainTexts[ {{ 1, numDatabase }} ]:long()
-
         queries = trainset[I]:index(1, images)
-        database = trainset[X]:index(1, texts)
-
         queryLabels = train_labels_image:float():index(1, images)
-        databaseLabels = train_labels_text:float():index(1, texts)
     else
-        texts = trainTexts[ {{ 1, numQueries }} ]:long()
-        images = trainImages[ {{ 1, numDatabase }} ]:long()
-
         queries = trainset[X]:index(1, texts)
-        database = trainset[I]:index(1, images)
-
         queryLabels = train_labels_text:float():index(1, texts)
+    end
+
+    if toModality == I then
+        database = trainset[I]:index(1, images)
         databaseLabels = train_labels_image:float():index(1, images)
+    else
+        database = trainset[X]:index(1, texts)
+        databaseLabels = train_labels_text:float():index(1, texts)
     end
 
     queryCodes = getHashCodes(queries)
@@ -68,11 +84,11 @@ function getDistanceAndSimilarityForMAP(queryCodes, databaseCodes, queryLabels, 
     return D, S
 end
 
-function calcMAP(fromModality, toModality)
+function calcMAP(fromModality, toModality, trainOrVal)
 
     K = 50
 
-    queryCodes, databaseCodes, queryLabels, databaseLabels = getQueryAndDBCodes(fromModality, toModality)
+    queryCodes, databaseCodes, queryLabels, databaseLabels = getQueryAndDBCodes(fromModality, toModality, trainOrVal)
 
     -- Q = 1
     Q = queryCodes:size(1)

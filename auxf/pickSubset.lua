@@ -7,22 +7,28 @@ function pickSubset(loadPairsFromFile)
 		sim_ratio_tr = torch.load(filePath .. 'simRatioTr.t7')
 		sim_ratio_te = torch.load(filePath .. 'simRatioTe.t7')
 
-		imageIdx = torch.randperm(17251)[{{1,5000}}]
-		textIdx = torch.randperm(17251)[{{1,5000}}]
+		local images = torch.randperm(17251)[{{1,6000}}]:long()
+		local texts = torch.randperm(17251)[{{1,6000}}]:long()
 
-		pos_pairs = torch.Tensor(5000*5000, 2)
-		neg_pairs = torch.Tensor(5000*5000, 2)
+		trainImages = images[ {{ 1, 5000 }} ]
+		trainTexts = texts[ {{ 1, 5000 }} ]
+
+		valImages = images[ {{ 5001, 6000 }} ]
+		valTexts = texts[ {{ 5001, 6000 }} ]
+
+		pos_pairs = torch.LongTensor(5000*5000, 2)
+		neg_pairs = torch.LongTensor(5000*5000, 2)
 		p_idx = 1
 		n_idx = 1
 		for i = 1,5000 do
 			for j = 1,5000 do
-				if sim_ratio_tr[imageIdx[i]][textIdx[j]] == 0 then
-					neg_pairs[n_idx][1] = imageIdx[i]
-					neg_pairs[n_idx][2] = textIdx[j]
+				if sim_ratio_tr[trainImages[i]][trainTexts[j]] == 0 then
+					neg_pairs[n_idx][1] = trainImages[i]
+					neg_pairs[n_idx][2] = trainTexts[j]
 					n_idx = n_idx + 1
-				elseif sim_ratio_tr[imageIdx[i]][textIdx[j]] > 0.5 then
-					pos_pairs[p_idx][1] = imageIdx[i]
-					pos_pairs[p_idx][2] = textIdx[j]
+				elseif sim_ratio_tr[trainImages[i]][trainTexts[j]] > 0.5 then
+					pos_pairs[p_idx][1] = trainImages[i]
+					pos_pairs[p_idx][2] = trainTexts[j]
 					p_idx = p_idx + 1
 				end
 			end
@@ -31,30 +37,32 @@ function pickSubset(loadPairsFromFile)
 		pos_pairs:resize(p_idx - 1, 2)
 		neg_pairs:resize(n_idx - 1, 2)
 	else
-		train_pairs = torch.load(filePath .. 'trainPairs.t7')
+		subset_info = torch.load(filePath .. 'subsetInfo.t7')
 
-		pos_pairs = train_pairs.pos_pairs
-		neg_pairs = train_pairs.neg_pairs
-		imageIdx = train_pairs.imageIdx
-		textIdx = train_pairs.textIdx
+		pos_pairs = subset_info.pos_pairs
+		neg_pairs = subset_info.neg_pairs
+		trainImages = subset_info.trainImages
+		trainTexts = subset_info.trainTexts
+		valImages = subset_info.valImages
+		valTexts = subset_info.valTexts
 	end
 
-	p_size = pos_pairs:size(1)
-	n_size = neg_pairs:size(1)
+	local p_size = pos_pairs:size(1)
+	local n_size = neg_pairs:size(1)
 
-	return pos_pairs, neg_pairs, p_size, n_size -- TODO: I want to return imageIdx and textIdx but compiler gives error
+	return pos_pairs, neg_pairs, trainImages, trainTexts, valImages, valTexts, p_size, n_size
 end
 
-pos_pairs, neg_pars, p_size, n_size = pickSubset(true)
+-- pos_pairs, neg_pairs, trainImages, trainTexts, valImages, valTexts, p_size, n_size = pickSubset(true)
 
--- This method does not allow replacement
-tot_size = pos_pairs:size(1) + neg_pairs:size(1)
-pair_perm = torch.randperm(tot_size)
+-- -- This method does not allow replacement
+-- tot_size = pos_pairs:size(1) + neg_pairs:size(1)
+-- pair_perm = torch.randperm(tot_size)
 
-pos_perm = torch.randperm(p_size)
-neg_perm = torch.randperm(n_size)
-epoch_pos_idx = pos_perm[{{1,posExamplesPerEpoch}}]
-epoch_neg_idx = neg_perm[{{1,negExamplesPerEpoch}}]
+-- pos_perm = torch.randperm(p_size)
+-- neg_perm = torch.randperm(n_size)
+-- epoch_pos_idx = pos_perm[{{1,posExamplesPerEpoch}}]
+-- epoch_neg_idx = neg_perm[{{1,negExamplesPerEpoch}}]
 
 -- y = torch.Tensor(100):fill(L)
 -- y = y:cat(torch.Tensor(500):fill(0))
@@ -64,3 +72,33 @@ epoch_neg_idx = neg_perm[{{1,negExamplesPerEpoch}}]
 -- n_range = torch.range(1,n_size)
 -- epoch_pos_idx = torch.multinomial(p_range, 100, false)
 -- epoch_neg_idx = torch.multinomial(n_range, 500, false)
+
+function pickValSet()
+
+	valImages = torch.Tensor(1000)
+	valTexts = torch.Tensor(1000)
+
+	imagePerm = torch.randperm(6000)
+	local permIdx = 1
+	local valIdx = 1
+	while (valIdx <= 1000) do
+		local im = imagePerm[permIdx]
+		if torch.eq(trainImages, im):sum() == 0 then
+			valImages[valIdx] = im
+			valIdx = valIdx + 1
+		end
+		permIdx = permIdx + 1
+	end
+
+	textPerm = torch.randperm(6000)
+	local permIdx = 1
+	local valIdx = 1
+	while (valIdx <= 1000) do
+		local te = textPerm[permIdx]
+		if torch.eq(trainTexts, te):sum() == 0 then
+			valTexts[valIdx] = te
+			valIdx = valIdx + 1
+		end
+		permIdx = permIdx + 1
+	end
+end

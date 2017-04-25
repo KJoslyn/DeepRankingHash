@@ -77,23 +77,20 @@ end
 
 function getQueryAndDBCodesTest(fromModality, toModality)
 
-    local numQueries = 5000
-    local numDatabase = 5000
-
     if fromModality == I then
-
         queries = testset[I]
-        database = trainset[X]
-
         queryLabels = test_labels_image:float()
-        databaseLabels = train_labels_text:float()
     else
-
         queries = testset[X]
-        database = trainset[I]
-
         queryLabels = test_labels_text:float()
+    end
+
+    if toModality == I then
+        database = trainset[I]
         databaseLabels = train_labels_image:float()
+    else
+        database = trainset[X]
+        databaseLabels = train_labels_text:float()
     end
 
     queryCodes = getHashCodes(queries)

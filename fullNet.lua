@@ -2,9 +2,10 @@
 -- //////////////////////////////////////////
 -- Typical flow:
 -- require 'fullNet'
--- loadModelAndData()
+-- loadFullModel()
+-- loadData()
 -- optional: loadModelSnapshot() -- createModel.lua
--- trainAndEvaluate()
+-- trainAndEvaluate() or runEvals()
 -- /////////////////////////////////////////
 
 function loadStandardPackages() 
@@ -105,11 +106,8 @@ function loadData()
   end
 
   if not pos_pairs then
-      pos_pairs, neg_pairs, p_size, n_size = pickSubset(true)
+      pos_pairs, neg_pairs, trainImages, trainTexts, valImages, valTexts, p_size, n_size = pickSubset(true)
   end
-  -- TODO: These are global variables that come from pickSubset. I want to return them instead but the compiler gives an error.
-  trainImages = imageIdx:long()
-  trainTexts = textIdx:long()
 
 end -- end loadModelAndData()
 
@@ -222,37 +220,8 @@ function trainAndEvaluate(numEpochs)
           -- collectgarbage()
       end
 
-      model:evaluate()
-      -- epochPred = model:forward(trainBatch.data)
-
-      -- batchTextToImageMAP = calcMAP(X, I, trainBatch)
-      -- batchImageToTextMAP = calcMAP(I, X, trainBatch)
       if epoch % 5 == 0 then
-          textToImageMAP = calcMAP(X, I, nil)
-          imageToTextMAP = calcMAP(I, X, nil)
-
-          imageAccuracy = calcClassAccuracyForModality(I)
-          textAccuracy = calcClassAccuracyForModality(X)
-
-          batchTextClassAcc = calcClassAccuracy(trainBatch.data[X], trainBatch.label[X])
-          batchImageClassAcc = calcClassAccuracy(trainBatch.data[I], trainBatch.label[I])-- TODO: This is not very useful because it is only for the last batch in the epoch
-
-          statsPrint("=====Epoch " .. epoch, sf, sfv)
-          calcAndPrintHammingAccuracy(trainBatch, batch_sim_label, sfv) -- TODO: This is not very useful because it is only for the last batch in the epoch
-
-          statsPrint(string.format("Avg Loss this epoch = %.2f", epochLoss / numBatches), sf, sfv)
-          statsPrint(string.format("Avg Loss overall = %.2f", totalLoss / iterationsComplete), sf, sfv)
-
-          -- statsPrint(string.format("Batch Text to Image MAP = %.2f", batchTextToImageMAP))
-          -- statsPrint(string.format("Batch Image to Text MAP = %.2f", batchImageToTextMAP))
-          statsPrint(string.format("Text to Image MAP = %.2f", textToImageMAP), sf, sfv)
-          statsPrint(string.format("Image to Text MAP = %.2f", imageToTextMAP), sf, sfv)
-
-          statsPrint(string.format('Image Classification Acc: %.2f', imageAccuracy), sf, sfv)
-          statsPrint(string.format('Text Classification Acc: %.2f', textAccuracy), sf, sfv)
-
-          statsPrint(string.format("Batch Text Classification Acc = %.2f", batchTextClassAcc), sfv)
-          statsPrint(string.format("Batch Image Classification Acc = %.2f", batchImageClassAcc), sfv)
+        runEvals(epoch) -- calls model:evaluate()
       end
 
       if epoch % 50 == 0 then
@@ -273,9 +242,43 @@ function trainAndEvaluate(numEpochs)
 
   io.close(sf)
   io.close(sfv)
-
-  --[[
-  model:evaluate()
-  --]]
-
 end -- end trainAndEvaluate()
+
+function runEvals(evalEpoch)
+
+  model:evaluate()
+
+  if evalEpoch then
+    statsPrint("=====Epoch " .. evalEpoch, sf, sfv)
+    calcAndPrintHammingAccuracy(trainBatch, batch_sim_label, sfv) -- TODO: This is not very useful because it is only for the last batch in the epoch
+    statsPrint(string.format("Avg Loss this epoch = %.2f", epochLoss / numBatches), sf, sfv)
+    statsPrint(string.format("Avg Loss overall = %.2f", totalLoss / iterationsComplete), sf, sfv)
+
+    imageAccuracy = calcClassAccuracyForModality(I)
+    textAccuracy = calcClassAccuracyForModality(X)
+    statsPrint(string.format('Image Classification Acc: %.2f', imageAccuracy), sf, sfv)
+    statsPrint(string.format('Text Classification Acc: %.2f', textAccuracy), sf, sfv)
+
+    batchTextClassAcc = calcClassAccuracy(trainBatch.data[X], trainBatch.label[X])
+    batchImageClassAcc = calcClassAccuracy(trainBatch.data[I], trainBatch.label[I])-- TODO: This is not very useful because it is only for the last batch in the epoch
+    statsPrint(string.format("Batch Text Classification Acc = %.2f", batchTextClassAcc), sfv)
+    statsPrint(string.format("Batch Image Classification Acc = %.2f", batchImageClassAcc), sfv)
+  end
+
+  IXt = calcMAP(I, X, 'train')
+  XIt = calcMAP(X, I, 'train')
+  IXv = calcMAP(I, X, 'val')
+  XIv = calcMAP(X, I, 'val')
+  -- IIt = calcMAP(I, I, 'train')
+  -- XXt = calcMAP(X, X, 'train')
+  IIv = calcMAP(I, I, 'val')
+  XXv = calcMAP(X, X, 'val')
+
+  statsPrint(string.format("X -> I train MAP = %.2f", XIt), sf, sfv)
+  statsPrint(string.format("I -> X train MAP = %.2f", IXt), sf, sfv)
+  statsPrint(string.format("X -> I val MAP = %.2f", XIv), sf, sfv)
+  statsPrint(string.format("I -> X val MAP = %.2f", IXv), sf, sfv)
+  statsPrint(string.format("X -> X val MAP = %.2f", XXv), sf, sfv)
+  statsPrint(string.format("I -> I val MAP = %.2f", IIv), sf, sfv)
+
+end
