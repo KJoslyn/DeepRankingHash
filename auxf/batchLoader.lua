@@ -7,7 +7,13 @@ function getBatch(pos_pairs, neg_pairs, p_size, n_size)
     batchPosPairs = pos_pairs:index(1, idxInPosPairs)
     batchNegPairs = neg_pairs:index(1, idxInNegPairs)
 
-    batchIdxInTrainset = torch.cat(batchPosPairs, batchNegPairs, 1):long()
+    batchIdxInTrainset = torch.cat(batchPosPairs:sub(1,posExamplesPerBatch,1,2):long(), batchNegPairs, 1)
+
+    batch_sim_label_for_loss = torch.Tensor(totNumExamplesPerBatch):fill(0)
+    for p = 1, posExamplesPerBatch do
+        batch_sim_label_for_loss[p] = batchPosPairs[p][3]
+    end
+    batch_sim_label_for_loss = batch_sim_label_for_loss * L
 
     batch = {}
     batch.data = {}
@@ -20,6 +26,7 @@ function getBatch(pos_pairs, neg_pairs, p_size, n_size)
     batch.label[X] = train_labels_text:index(1, batchIdxInTrainset:select(2,2))
     batch.label[I] = batch.label[I]:cuda()
     batch.label[X] = batch.label[X]:cuda()
+    batch.batch_sim_label_for_loss = batch_sim_label_for_loss:cuda()
 
     return batch
 end

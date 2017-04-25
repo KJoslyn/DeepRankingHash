@@ -30,21 +30,20 @@ function loadParamsAndPackages()
   -- Variable Parameters
   -- numEpochs = 200 -- 416 is max number without truncating an epoch. This is now an input parameter to trainAndEvaluate
   g_lrMultForHashLayer = 1e4 -- 1e4, 1e5, etc
-  g_modelType = 'gr' -- fully connected b/t class and hash segments
-  -- modelType = 'fc' -- grouped b/t class and hash segments
-  -- posExamplesPerEpoch = 1e4
-  -- negExamplesPerEpoch = 5e4
-  posExamplesPerEpoch = 20*100
-  negExamplesPerEpoch = 100*100
+  g_modelType = 'gr' -- 'hgr', 'fc', 'hfc'
   L = 8
   k = 4
+  sim_label_type = 'fixed' -- 'Variable'
   hashLayerSize = L * k
   baseLearningRate = 1e-6
   baseWeightDecay = 0
-  posExamplesPerBatch = 20
-  negExamplesPerBatch = 100
+  posExamplesPerBatch = 25 -- 20
+  negExamplesPerBatch = 75 -- 100
+  iterationsPerEpoch = 100
 
   -- These are inferred from above
+  posExamplesPerEpoch = posExamplesPerBatch*iterationsPerEpoch
+  negExamplesPerEpoch = negExamplesPerBatch*iterationsPerEpoch
   epochSize = posExamplesPerEpoch + negExamplesPerEpoch
   totNumExamplesPerBatch = posExamplesPerBatch + negExamplesPerBatch
   numBatches = epochSize / totNumExamplesPerBatch
@@ -86,6 +85,8 @@ function loadFullModel(modelType, lrMultForHashLayer)
   imageClassifier, imageHasher = getImageModelForFullNet(L, k, modelType, lrMultForHashLayer)
   textClassifier, textHasher = getTextModelForFullNet(L, k, modelType, lrMultForHashLayer)
   model = createCombinedModel(imageHasher, textHasher)
+  imageSiameseModel = getSiameseHasher(imageHasher)
+  textSiameseModel = getSiameseHasher(textHasher)
 end
 
 function loadData() 
@@ -137,7 +138,7 @@ function trainAndEvaluate(numEpochs)
   batch_sim_label = torch.Tensor(posExamplesPerBatch):fill(1)
   batch_sim_label = batch_sim_label:cat(torch.Tensor(negExamplesPerBatch):fill(0))
   batch_sim_label = torch.CudaByteTensor(totNumExamplesPerBatch):copy(batch_sim_label)
-  batch_label_for_loss = torch.CudaTensor(totNumExamplesPerBatch):copy(batch_sim_label) * L
+  batch_sim_label_for_loss_fixed = torch.CudaTensor(totNumExamplesPerBatch):copy(batch_sim_label) * L
 
   -- -- POS ONLY The label tensor will be the same for each batch
   -- batch_sim_label = torch.Tensor(100):fill(1)
@@ -193,7 +194,12 @@ function trainAndEvaluate(numEpochs)
               -- paramCopy:copy(params)
 
               input = trainBatch.data
-              target = batch_label_for_loss
+              -- target = batch_label_for_loss
+              if sim_label_type == 'fixed' then
+                target = batch_sim_label_for_loss_fixed
+              else if sim_label_type == 'variable' then
+                target = trainBatch.batch_sim_label_for_loss
+              end
               inputSize = input[1]:size(1)
 
               gradParams:zero()
@@ -250,7 +256,7 @@ function runEvals(evalEpoch)
 
   if evalEpoch then
     statsPrint("=====Epoch " .. evalEpoch, sf, sfv)
-    calcAndPrintHammingAccuracy(trainBatch, batch_sim_label, sfv) -- TODO: This is not very useful because it is only for the last batch in the epoch
+    -- calcAndPrintHammingAccuracy(trainBatch, batch_sim_label, sfv) -- TODO: This is not very useful because it is only for the last batch in the epoch
     statsPrint(string.format("Avg Loss this epoch = %.2f", epochLoss / numBatches), sf, sfv)
     statsPrint(string.format("Avg Loss overall = %.2f", totalLoss / iterationsComplete), sf, sfv)
 

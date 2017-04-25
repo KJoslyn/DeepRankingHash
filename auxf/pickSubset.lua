@@ -16,26 +16,36 @@ function pickSubset(loadPairsFromFile)
 		valImages = images[ {{ 5001, 6000 }} ]
 		valTexts = texts[ {{ 5001, 6000 }} ]
 
-		pos_pairs = torch.LongTensor(5000*5000, 2)
+		pos_pairs = torch.Tensor(5000*5000, 3)
 		neg_pairs = torch.LongTensor(5000*5000, 2)
 		p_idx = 1
 		n_idx = 1
 		for i = 1,5000 do
 			for j = 1,5000 do
-				if sim_ratio_tr[trainImages[i]][trainTexts[j]] == 0 then
+				local sr = sim_ratio_tr[trainImages[i]][trainTexts[j]]
+				if sr == 0 then
 					neg_pairs[n_idx][1] = trainImages[i]
 					neg_pairs[n_idx][2] = trainTexts[j]
 					n_idx = n_idx + 1
-				elseif sim_ratio_tr[trainImages[i]][trainTexts[j]] > 0.5 then
+				elseif sr > 0.5 then
 					pos_pairs[p_idx][1] = trainImages[i]
 					pos_pairs[p_idx][2] = trainTexts[j]
+					pos_pairs[p_idx][3] = sr
 					p_idx = p_idx + 1
 				end
 			end
 		end
 
-		pos_pairs:resize(p_idx - 1, 2)
+		pos_pairs:resize(p_idx - 1, 3)
 		neg_pairs:resize(n_idx - 1, 2)
+
+		subset_info = {}
+		subset_info.pos_pairs = pos_pairs
+		subset_info.neg_pairs = neg_pairs
+		subset_info.trainImages = trainImages
+		subset_info.trainTexts = trainTexts
+		subset_info.valImages = valImages
+		subset_info.valTexts = valTexts
 	else
 		subset_info = torch.load(filePath .. 'subsetInfo.t7')
 
@@ -101,4 +111,31 @@ function pickValSet()
 		end
 		permIdx = permIdx + 1
 	end
+end
+
+function addSimRatio()
+
+	sim_ratio_tr = torch.load(filePath .. 'simRatioTr.t7')
+
+	subset_info = torch.load(filePath .. 'subsetInfo.t7')
+
+	local N = subset_info.pos_pairs:size(1)
+
+	-- subset_info.pos_pairs = subset_info.pos_pairs:resize(N, 3)
+	local pp = torch.Tensor(N, 3)
+	for i = 1,N do
+		pp[i][1] = subset_info.pos_pairs[i][1]
+		pp[i][2] = subset_info.pos_pairs[i][2]
+    end
+	subset_info.pos_pairs = pp
+
+	ii = 1
+	while ii <= N do
+		local sr = sim_ratio_tr[subset_info.pos_pairs[ii][1]][subset_info.pos_pairs[ii][2]]
+		subset_info.pos_pairs[ii][3] = sr
+		ii = ii + 1
+	end
+
+	torch.save(filePath .. 'subsetInfo.t7', subset_info)
+
 end

@@ -194,6 +194,23 @@ function createCombinedModel(imageHasher, textHasher)
     return model
 end
 
+function getSiameseHasher(hasher)
+
+    local model = nn.Sequential()
+    local net2 = hasher:clone('weight', 'bias')
+
+    local prl = nn.ParallelTable()
+    prl:add(hasher)
+    prl:add(net2)
+
+    model:add(prl)
+    model:add(nn.DotProduct())
+
+    model = model:cuda()
+
+    return model
+end
+
 function getCriterion()
 
     criterion = nn.MSECriterion()
