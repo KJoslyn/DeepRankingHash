@@ -197,7 +197,8 @@ end
 function getSiameseHasher(hasher)
 
     local model = nn.Sequential()
-    local net2 = hasher:clone('weight', 'bias')
+
+    local net2 = hasher:clone('weight', 'bias', 'gradWeight', 'gradBias')
 
     local prl = nn.ParallelTable()
     prl:add(hasher)

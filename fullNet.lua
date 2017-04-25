@@ -59,16 +59,17 @@ function loadParamsAndPackages()
   filePath = '/home/kjoslyn/kevin/' -- server
   snapshotDir = '/home/kjoslyn/kevin/Project/snapshots'
 
-  package.loaded.pickSubset = nil
-  package.loaded.evaluate = nil
-  package.loaded.dataLoader = nil
-  package.loaded.batchLoader = nil
-  package.loaded.createModel = nil
-  require 'auxf.pickSubset'
-  require 'auxf.evaluate'
-  require 'auxf.dataLoader'
-  require 'auxf.batchLoader'
-  require 'auxf.createModel'
+  reloadAuxfPackage('pickSubset')
+  reloadAuxfPackage('evaluate')
+  reloadAuxfPackage('dataLoader')
+  reloadAuxfPackage('batchLoader')
+  reloadAuxfPackage('createModel')
+end
+
+function reloadAuxfPackage(pname)
+  local pkg = 'auxf.' .. pname
+  package.loaded[pkg] = nil
+  require(pkg)
 end
 
 function loadFullModel(modelType, lrMultForHashLayer)
@@ -85,7 +86,7 @@ function loadFullModel(modelType, lrMultForHashLayer)
   imageClassifier, imageHasher = getImageModelForFullNet(L, k, modelType, lrMultForHashLayer)
   textClassifier, textHasher = getTextModelForFullNet(L, k, modelType, lrMultForHashLayer)
   model = createCombinedModel(imageHasher, textHasher)
-  imageSiameseModel = getSiameseHasher(imageHasher)
+  -- imageSiameseModel = getSiameseHasher(imageHasher)
   textSiameseModel = getSiameseHasher(textHasher)
 end
 
@@ -107,10 +108,10 @@ function loadData()
   end
 
   if not pos_pairs then
-      pos_pairs, neg_pairs, trainImages, trainTexts, valImages, valTexts, p_size, n_size = pickSubset(true)
+      pos_pairs, neg_pairs, trainImages, trainTexts, valImages, valTexts, pos_pairs_image, neg_pairs_image, pos_pairs_text, neg_pairs_text = pickSubset(true)
   end
 
-end -- end loadModelAndData()
+end -- end loadData()
 
 function trainAndEvaluate(numEpochs)
 
@@ -140,28 +141,14 @@ function trainAndEvaluate(numEpochs)
   batch_sim_label = torch.CudaByteTensor(totNumExamplesPerBatch):copy(batch_sim_label)
   batch_sim_label_for_loss_fixed = torch.CudaTensor(totNumExamplesPerBatch):copy(batch_sim_label) * L
 
-  -- -- POS ONLY The label tensor will be the same for each batch
-  -- batch_sim_label = torch.Tensor(100):fill(1)
-  -- batch_sim_label = torch.CudaByteTensor(100):copy(batch_sim_label)
-  -- batch_label_for_loss = torch.CudaTensor(100):copy(batch_sim_label) * L
-
-  -- -- NEG ONLY The label tensor will be the same for each batch
-  -- batch_sim_label = torch.Tensor(100):fill(0)
-  -- batch_sim_label = torch.CudaByteTensor(100):copy(batch_sim_label)
-  -- batch_label_for_loss = torch.CudaTensor(100):copy(batch_sim_label)
-
   iterationsComplete = 0
 
   trainBatch = {}
 
   if trainOnOneBatch == 1 then
     print("**************WARNING- Training on one batch only")
-    trainBatch = getBatch(pos_pairs, neg_pairs, p_size, n_size)
+    trainBatch = getBatch(pos_pairs, neg_pairs, 'C')
   end
-
-  totalLoss = 0
-  -- epochHistorySize = 5
-  -- epochHistoryLoss = torch.Tensor(epochHistorySize):fill(0)
 
   date = os.date("*t", os.time())
   dateStr = date.month .. "_" .. date.day .. "_" .. date.hour .. "_" .. date.min
@@ -179,7 +166,7 @@ function trainAndEvaluate(numEpochs)
       for batchNum = 0, numBatches - 1 do
 
           if trainOnOneBatch == 0 then
-            trainBatch = getBatch(pos_pairs, neg_pairs, p_size, n_size)
+            trainBatch = getBatch(pos_pairs, neg_pairs, 'C') -- 'C' for Cross-Modal (both modalities)
           end
 
           function feval(x)
@@ -188,16 +175,10 @@ function trainAndEvaluate(numEpochs)
                 params:copy(x) 
               end         
 
-              -- if (torch.eq(params, paramCopy):sum() == params:size(1)) then
-              --   print('Epoch ' .. epoch .. ', Batch ' .. batchNum .. ': params eq paramCopy')
-              -- end
-              -- paramCopy:copy(params)
-
               input = trainBatch.data
-              -- target = batch_label_for_loss
               if sim_label_type == 'fixed' then
                 target = batch_sim_label_for_loss_fixed
-              else if sim_label_type == 'variable' then
+              elseif sim_label_type == 'variable' then
                 target = trainBatch.batch_sim_label_for_loss
               end
               inputSize = input[1]:size(1)
@@ -214,8 +195,6 @@ function trainAndEvaluate(numEpochs)
 
               -- Stats
               epochLoss = epochLoss + loss
-              -- epochHistoryLoss[(epoch % epochHistorySize) + 1] = loss
-              totalLoss = totalLoss + loss
 
               return loss, gradParams
           end
@@ -227,11 +206,13 @@ function trainAndEvaluate(numEpochs)
       end
 
       if epoch % 5 == 0 then
-        runEvals(epoch) -- calls model:evaluate()
+        statsPrint("=====Epoch " .. epoch, sf, sfv)
+        -- calcAndPrintHammingAccuracy(trainBatch, batch_sim_label, sfv) -- TODO: This is not very useful because it is only for the last batch in the epoch
+        statsPrint(string.format("Avg Loss this epoch = %.2f", epochLoss / numBatches), sf, sfv)
+        runEvals() -- calls model:evaluate()
       end
 
       if epoch % 50 == 0 then
-          -- local paramsToSave, gp = model:getParameters()
           local snapshotFile = snapshotDir .. "/snapshot_epoch_" .. epoch .. ".t7" 
           local snapshot = {}
           snapshot.params = params
@@ -248,28 +229,22 @@ function trainAndEvaluate(numEpochs)
 
   io.close(sf)
   io.close(sfv)
+
 end -- end trainAndEvaluate()
 
-function runEvals(evalEpoch)
+function runEvals()
 
   model:evaluate()
 
-  if evalEpoch then
-    statsPrint("=====Epoch " .. evalEpoch, sf, sfv)
-    -- calcAndPrintHammingAccuracy(trainBatch, batch_sim_label, sfv) -- TODO: This is not very useful because it is only for the last batch in the epoch
-    statsPrint(string.format("Avg Loss this epoch = %.2f", epochLoss / numBatches), sf, sfv)
-    statsPrint(string.format("Avg Loss overall = %.2f", totalLoss / iterationsComplete), sf, sfv)
+  imageAccuracy = calcClassAccuracyForModality(I)
+  textAccuracy = calcClassAccuracyForModality(X)
+  statsPrint(string.format('Image Classification Acc: %.2f', imageAccuracy), sf, sfv)
+  statsPrint(string.format('Text Classification Acc: %.2f', textAccuracy), sf, sfv)
 
-    imageAccuracy = calcClassAccuracyForModality(I)
-    textAccuracy = calcClassAccuracyForModality(X)
-    statsPrint(string.format('Image Classification Acc: %.2f', imageAccuracy), sf, sfv)
-    statsPrint(string.format('Text Classification Acc: %.2f', textAccuracy), sf, sfv)
-
-    batchTextClassAcc = calcClassAccuracy(trainBatch.data[X], trainBatch.label[X])
-    batchImageClassAcc = calcClassAccuracy(trainBatch.data[I], trainBatch.label[I])-- TODO: This is not very useful because it is only for the last batch in the epoch
-    statsPrint(string.format("Batch Text Classification Acc = %.2f", batchTextClassAcc), sfv)
-    statsPrint(string.format("Batch Image Classification Acc = %.2f", batchImageClassAcc), sfv)
-  end
+  batchTextClassAcc = calcClassAccuracy(trainBatch.data[X], trainBatch.label[X])
+  batchImageClassAcc = calcClassAccuracy(trainBatch.data[I], trainBatch.label[I])-- TODO: This is not very useful because it is only for the last batch in the epoch
+  statsPrint(string.format("Batch Text Classification Acc = %.2f", batchTextClassAcc), sfv)
+  statsPrint(string.format("Batch Image Classification Acc = %.2f", batchImageClassAcc), sfv)
 
   IXt = calcMAP(I, X, 'train')
   XIt = calcMAP(X, I, 'train')
@@ -286,5 +261,132 @@ function runEvals(evalEpoch)
   statsPrint(string.format("I -> X val MAP = %.2f", IXv), sf, sfv)
   statsPrint(string.format("X -> X val MAP = %.2f", XXv), sf, sfv)
   statsPrint(string.format("I -> I val MAP = %.2f", IIv), sf, sfv)
+end
+
+function trainAndEvaluateIntraModal(numEpochs)
+
+  criterion = getCriterion()
+
+  -- local learningRates_image, weightDecays_image = imageSiameseModel:getOptimConfig(baseLearningRate, baseWeightDecay)
+
+  -- optimState_image = {
+  --       learningRate = baseLearningRate,
+  --       learningRates = learningRates_image,
+  --       weightDecays = weightDecays_image
+  -- }
+
+  local learningRates_text, weightDecays_text = textSiameseModel:getOptimConfig(baseLearningRate, baseWeightDecay)
+
+  optimState_text = {
+        learningRate = baseLearningRate,
+        learningRates = learningRates_text,
+        weightDecays = weightDecays_text
+  }
+
+  -- imageSiameseModel:get(1):get(2):share(imageSiameseModel:get(1):get(1), 'bias', 'weight', 'gradWeight', 'gradParams')
+  -- textSiameseModel:get(1):get(2):share(textSiameseModel:get(1):get(1), 'bias', 'weight', 'gradWeight', 'gradParams')
+
+  -- params, gradParams = model:getParameters()
+  -- params_image, gradParams_image = imageSiameseModel:getParameters()
+  -- params_text, gradParams_text = textSiameseModel:getParameters()
+
+  for epoch = 1, numEpochs do
+    -- doOneEpochIntraModal('I', epoch)
+    doOneEpochIntraModal('X', epoch)
+
+    if epoch % 5 == 0 then
+      runEvals()
+    end
+  end
+
+end
+
+function doParamStuff()
+  params, gradParams = model:getParameters()
+  -- params_image, gradParams_image = imageSiameseModel:getParameters()
+  params_text, gradParams_text = textSiameseModel:getParameters()
+
+  -- imageSiameseModel:get(1):get(2):share(imageSiameseModel:get(1):get(1), 'bias', 'weight', 'gradWeight', 'gradParams')
+  textSiameseModel:get(1):get(2):share(textSiameseModel:get(1):get(1), 'bias', 'weight', 'gradWeight', 'gradParams')
+end
+
+function doOneEpochIntraModal(modality, evalEpoch)
+
+  -- The label tensor will be the same for each batch
+  batch_sim_label = torch.Tensor(posExamplesPerBatch):fill(1)
+  batch_sim_label = batch_sim_label:cat(torch.Tensor(negExamplesPerBatch):fill(0))
+  batch_sim_label = torch.CudaByteTensor(totNumExamplesPerBatch):copy(batch_sim_label)
+  batch_sim_label_for_loss_fixed = torch.CudaTensor(totNumExamplesPerBatch):copy(batch_sim_label) * L
+
+  trainBatch = {}
+
+  local model, params, gradParams, optimState
+
+  if modality == 'X' then
+    model = textSiameseModel
+    params = params_text
+    gradParams = gradParams_text
+    optimState = optimState_text
+  elseif modality == 'I' then
+    model = imageSiameseModel
+    params = params_image
+    gradParams = gradParams_image
+    optimState = optimState_image
+  elseif modality == 'B' then
+    print('TODO: Put in Both functionality')
+  else
+    print('Error: unrecognized modality in doOneEpochIntraModal')
+  end
+
+  model:training()
+
+  epochLoss = 0
+
+  for batchNum = 0, numBatches - 1 do
+
+      if modality == 'X' then
+        trainBatch = getBatch(pos_pairs_text, neg_pairs_text, modality)
+      elseif modality == 'I' then
+        trainBatch = getBatch(pos_pairs_image, neg_pairs_image, modality)
+      end
+
+      function feval(x)
+          -- get new parameters
+          if x ~= params then -- TODO: This is never happening
+            params:copy(x) 
+          end         
+
+          input = trainBatch.data
+          if sim_label_type == 'fixed' then
+            target = batch_sim_label_for_loss_fixed
+          elseif sim_label_type == 'variable' then
+            target = trainBatch.batch_sim_label_for_loss
+          end
+          inputSize = input[1]:size(1)
+
+          gradParams:zero()
+
+          output = model:forward(input)
+          local loss = criterion:forward(output, target)
+          local dloss_doutput = criterion:backward(output, target)
+          model:backward(input, dloss_doutput)
+
+          gradParams:div(inputSize)
+          loss = loss/inputSize
+
+          -- Stats
+          epochLoss = epochLoss + loss
+
+          return loss, gradParams
+      end
+      optim.sgd(feval, params, optimState)
+
+  end
+
+  statsPrint("=== " .. modality .. " ===Epoch " .. evalEpoch, sf, sfv)
+  -- calcAndPrintHammingAccuracy(trainBatch, batch_sim_label, sfv) -- TODO: This is not very useful because it is only for the last batch in the epoch
+  statsPrint(string.format("Avg Loss this epoch = %.2f", epochLoss / numBatches), sf, sfv)
+
+  model:training()
 
 end
