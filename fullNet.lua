@@ -86,8 +86,8 @@ function loadFullModel(modelType, lrMultForHashLayer)
   imageClassifier, imageHasher = getImageModelForFullNet(L, k, modelType, lrMultForHashLayer)
   textClassifier, textHasher = getTextModelForFullNet(L, k, modelType, lrMultForHashLayer)
   model = createCombinedModel(imageHasher, textHasher)
-  -- imageSiameseModel = getSiameseHasher(imageHasher)
-  textSiameseModel = getSiameseHasher(textHasher)
+  imageSiameseModel = getSiameseHasher(imageHasher)
+  -- textSiameseModel = getSiameseHasher(textHasher)
 end
 
 function loadData() 
@@ -250,38 +250,42 @@ function runEvals()
   XIt = calcMAP(X, I, 'train')
   IXv = calcMAP(I, X, 'val')
   XIv = calcMAP(X, I, 'val')
-  -- IIt = calcMAP(I, I, 'train')
-  -- XXt = calcMAP(X, X, 'train')
+  IIt = calcMAP(I, I, 'train')
+  XXt = calcMAP(X, X, 'train')
   IIv = calcMAP(I, I, 'val')
   XXv = calcMAP(X, X, 'val')
 
   statsPrint(string.format("X -> I train MAP = %.2f", XIt), sf, sfv)
   statsPrint(string.format("I -> X train MAP = %.2f", IXt), sf, sfv)
+  statsPrint(string.format("X -> X train MAP = %.2f", XXt), sf, sfv)
+  statsPrint(string.format("I -> I train MAP = %.2f", IIt), sf, sfv)
   statsPrint(string.format("X -> I val MAP = %.2f", XIv), sf, sfv)
   statsPrint(string.format("I -> X val MAP = %.2f", IXv), sf, sfv)
   statsPrint(string.format("X -> X val MAP = %.2f", XXv), sf, sfv)
   statsPrint(string.format("I -> I val MAP = %.2f", IIv), sf, sfv)
 end
 
-function trainAndEvaluateIntraModal(numEpochs)
+function trainAndEvaluateIntraModal(numEpochs, optimStateLoaded)
 
   criterion = getCriterion()
 
-  -- local learningRates_image, weightDecays_image = imageSiameseModel:getOptimConfig(baseLearningRate, baseWeightDecay)
+  if not optimStateLoaded then
+    local learningRates_image, weightDecays_image = imageSiameseModel:getOptimConfig(baseLearningRate, baseWeightDecay)
 
-  -- optimState_image = {
+    optimState_image = {
+          learningRate = baseLearningRate,
+          learningRates = learningRates_image,
+          weightDecays = weightDecays_image
+    }
+  end
+
+  -- local learningRates_text, weightDecays_text = textSiameseModel:getOptimConfig(baseLearningRate, baseWeightDecay)
+
+  -- optimState_text = {
   --       learningRate = baseLearningRate,
-  --       learningRates = learningRates_image,
-  --       weightDecays = weightDecays_image
+  --       learningRates = learningRates_text,
+  --       weightDecays = weightDecays_text
   -- }
-
-  local learningRates_text, weightDecays_text = textSiameseModel:getOptimConfig(baseLearningRate, baseWeightDecay)
-
-  optimState_text = {
-        learningRate = baseLearningRate,
-        learningRates = learningRates_text,
-        weightDecays = weightDecays_text
-  }
 
   -- imageSiameseModel:get(1):get(2):share(imageSiameseModel:get(1):get(1), 'bias', 'weight', 'gradWeight', 'gradParams')
   -- textSiameseModel:get(1):get(2):share(textSiameseModel:get(1):get(1), 'bias', 'weight', 'gradWeight', 'gradParams')
@@ -291,8 +295,8 @@ function trainAndEvaluateIntraModal(numEpochs)
   -- params_text, gradParams_text = textSiameseModel:getParameters()
 
   for epoch = 1, numEpochs do
-    -- doOneEpochIntraModal('I', epoch)
-    doOneEpochIntraModal('X', epoch)
+    doOneEpochIntraModal('I', epoch)
+    -- doOneEpochIntraModal('X', epoch)
 
     if epoch % 5 == 0 then
       runEvals()
@@ -302,12 +306,12 @@ function trainAndEvaluateIntraModal(numEpochs)
 end
 
 function doParamStuff()
-  params, gradParams = model:getParameters()
-  -- params_image, gradParams_image = imageSiameseModel:getParameters()
-  params_text, gradParams_text = textSiameseModel:getParameters()
+  -- params_full, gradParams_full = model:getParameters()
+  params_image, gradParams_image = imageSiameseModel:getParameters()
+  -- params_text, gradParams_text = textSiameseModel:getParameters()
 
-  -- imageSiameseModel:get(1):get(2):share(imageSiameseModel:get(1):get(1), 'bias', 'weight', 'gradWeight', 'gradParams')
-  textSiameseModel:get(1):get(2):share(textSiameseModel:get(1):get(1), 'bias', 'weight', 'gradWeight', 'gradParams')
+  imageSiameseModel:get(1):get(2):share(imageSiameseModel:get(1):get(1), 'bias', 'weight', 'gradWeight', 'gradParams')
+  -- textSiameseModel:get(1):get(2):share(textSiameseModel:get(1):get(1), 'bias', 'weight', 'gradWeight', 'gradParams')
 end
 
 function doOneEpochIntraModal(modality, evalEpoch)
@@ -337,6 +341,8 @@ function doOneEpochIntraModal(modality, evalEpoch)
   else
     print('Error: unrecognized modality in doOneEpochIntraModal')
   end
+
+  ttt = params
 
   model:training()
 
