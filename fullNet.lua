@@ -87,7 +87,7 @@ function loadFullModel(modelType, lrMultForHashLayer)
   textClassifier, textHasher = getTextModelForFullNet(L, k, modelType, lrMultForHashLayer)
   model = createCombinedModel(imageHasher, textHasher)
   imageSiameseModel = getSiameseHasher(imageHasher)
-  -- textSiameseModel = getSiameseHasher(textHasher)
+  textSiameseModel = getSiameseHasher(textHasher)
 end
 
 function loadData() 
@@ -265,53 +265,57 @@ function runEvals()
   statsPrint(string.format("I -> I val MAP = %.2f", IIv), sf, sfv)
 end
 
-function trainAndEvaluateIntraModal(numEpochs, optimStateLoaded)
+function trainAndEvaluateIntraModal(modality, numEpochs, paramsAndOptimStatePrepared)
 
   criterion = getCriterion()
 
-  if not optimStateLoaded then
-    local learningRates_image, weightDecays_image = imageSiameseModel:getOptimConfig(baseLearningRate, baseWeightDecay)
+  if not paramsAndOptimStatePrepared then
 
-    optimState_image = {
-          learningRate = baseLearningRate,
-          learningRates = learningRates_image,
-          weightDecays = weightDecays_image
-    }
+    getAndShareParameters(modality)
+    
+    if modality == 'I' then
+
+      local learningRates_image, weightDecays_image = imageSiameseModel:getOptimConfig(baseLearningRate, baseWeightDecay)
+
+      optimState_image = {
+            learningRate = baseLearningRate,
+            learningRates = learningRates_image,
+            weightDecays = weightDecays_image
+      }
+
+    elseif modality == 'X' then
+
+      local learningRates_text, weightDecays_text = textSiameseModel:getOptimConfig(baseLearningRate, baseWeightDecay)
+
+      optimState_text = {
+            learningRate = baseLearningRate,
+            learningRates = learningRates_text,
+            weightDecays = weightDecays_text
+      }
+
+    end
   end
 
-  -- local learningRates_text, weightDecays_text = textSiameseModel:getOptimConfig(baseLearningRate, baseWeightDecay)
-
-  -- optimState_text = {
-  --       learningRate = baseLearningRate,
-  --       learningRates = learningRates_text,
-  --       weightDecays = weightDecays_text
-  -- }
-
-  -- imageSiameseModel:get(1):get(2):share(imageSiameseModel:get(1):get(1), 'bias', 'weight', 'gradWeight', 'gradParams')
-  -- textSiameseModel:get(1):get(2):share(textSiameseModel:get(1):get(1), 'bias', 'weight', 'gradWeight', 'gradParams')
-
-  -- params, gradParams = model:getParameters()
-  -- params_image, gradParams_image = imageSiameseModel:getParameters()
-  -- params_text, gradParams_text = textSiameseModel:getParameters()
-
   for epoch = 1, numEpochs do
-    doOneEpochIntraModal('I', epoch)
-    -- doOneEpochIntraModal('X', epoch)
+    doOneEpochIntraModal(modality, epoch)
 
-    if epoch % 5 == 0 then
+    if epoch % 10 == 0 or epoch % 5 == 0 and modality == 'I' then
       runEvals()
     end
   end
 
 end
 
-function doParamStuff()
+function getAndShareParameters(modality)
   -- params_full, gradParams_full = model:getParameters()
-  params_image, gradParams_image = imageSiameseModel:getParameters()
-  -- params_text, gradParams_text = textSiameseModel:getParameters()
 
-  imageSiameseModel:get(1):get(2):share(imageSiameseModel:get(1):get(1), 'bias', 'weight', 'gradWeight', 'gradParams')
-  -- textSiameseModel:get(1):get(2):share(textSiameseModel:get(1):get(1), 'bias', 'weight', 'gradWeight', 'gradParams')
+  if modality == 'I' then
+    params_image, gradParams_image = imageSiameseModel:getParameters()
+    imageSiameseModel:get(1):get(2):share(imageSiameseModel:get(1):get(1), 'bias', 'weight', 'gradWeight', 'gradParams')
+  elseif modality == 'X' then
+    params_text, gradParams_text = textSiameseModel:getParameters()
+    textSiameseModel:get(1):get(2):share(textSiameseModel:get(1):get(1), 'bias', 'weight', 'gradWeight', 'gradParams')
+  end
 end
 
 function doOneEpochIntraModal(modality, evalEpoch)
