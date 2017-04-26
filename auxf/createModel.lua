@@ -8,8 +8,8 @@ function getHashLayerFullyConnected(prevLayerSize, hashLayerSize, lrMultForHashL
         model:add(nn.Linear(prevLayerSize, prevLayerSize)
                  :init('weight', nninit.xavier, {dist = 'normal', gain = 'relu'})
                  :learningRate('weight', lrMultForHashLayer))
-        model:add(cudnn.ReLU(true))
-        model:add(nn.Dropout(0.500000))
+        -- model:add(cudnn.ReLU(true))
+        -- model:add(nn.Dropout(0.500000))
     end
 
     model:add(nn.Linear(prevLayerSize, hashLayerSize)

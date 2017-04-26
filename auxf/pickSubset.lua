@@ -40,8 +40,8 @@ function pickSubset(loadPairsFromFile)
 		neg_pairs:resize(n_idx - 1, 2)
 
 		subset_info = {}
-		subset_info.pos_pairs = pos_pairs
-		subset_info.neg_pairs = neg_pairs
+		subset_info.pos_pairs = pos_pairs -- Important- this is loaded later as pos_pairs full
+		subset_info.neg_pairs = neg_pairs -- Important- this is loaded later as neg_pairs full
 		subset_info.trainImages = trainImages
 		subset_info.trainTexts = trainTexts
 		subset_info.valImages = valImages
@@ -49,8 +49,8 @@ function pickSubset(loadPairsFromFile)
 	else
 		subset_info = torch.load(filePath .. 'subsetInfo.t7')
 
-		pos_pairs = subset_info.pos_pairs
-		neg_pairs = subset_info.neg_pairs
+		pos_pairs_full = subset_info.pos_pairs
+		neg_pairs_full = subset_info.neg_pairs
 		trainImages = subset_info.trainImages
 		trainTexts = subset_info.trainTexts
 		valImages = subset_info.valImages
@@ -62,10 +62,10 @@ function pickSubset(loadPairsFromFile)
 		neg_pairs_text = subset_info.neg_pairs_text
 	end
 
-	local p_size = pos_pairs:size(1)
-	local n_size = neg_pairs:size(1)
+	local p_size = pos_pairs_full:size(1)
+	local n_size = neg_pairs_full:size(1)
 
-	return pos_pairs, neg_pairs, trainImages, trainTexts, valImages, valTexts, pos_pairs_image, neg_pairs_image, pos_pairs_text, neg_pairs_text
+	return pos_pairs_full, neg_pairs_full, trainImages, trainTexts, valImages, valTexts, pos_pairs_image, neg_pairs_image, pos_pairs_text, neg_pairs_text
 end
 
 -- pos_pairs, neg_pairs, trainImages, trainTexts, valImages, valTexts, p_size, n_size = pickSubset(true)
