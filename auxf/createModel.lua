@@ -6,8 +6,10 @@ function getHashLayerFullyConnected(prevLayerSize, hashLayerSize, lrMultForHashL
 
     if addHiddenLayer then
         model:add(nn.Linear(prevLayerSize, prevLayerSize)
-                 :init('weight', nninit.xavier, {dist = 'normal'})
+                 :init('weight', nninit.xavier, {dist = 'normal', gain = 'relu'})
                  :learningRate('weight', lrMultForHashLayer))
+        -- model:add(cudnn.ReLU(true))
+        -- model:add(nn.Dropout(0.500000))
     end
 
     model:add(nn.Linear(prevLayerSize, hashLayerSize)
@@ -197,7 +199,9 @@ end
 function getSiameseHasher(hasher)
 
     local model = nn.Sequential()
-    local net2 = hasher:clone('weight', 'bias')
+
+    -- local net2 = hasher:clone('weight', 'bias', 'gradWeight', 'gradBias') -- Don't do this and call share later
+    local net2 = hasher:clone()
 
     local prl = nn.ParallelTable()
     prl:add(hasher)
@@ -235,7 +239,7 @@ function loadModelSnapshot(model, snapshot2ndLevelDir, snapshotFileName)
   snapshot = torch.load(snapshotFullPath)
   N = snapshot.params:size(1)
 
-  params, gparams = model:getParameters()
+  local params, gparams = model:getParameters()
 
   batchSize = 1e5
 

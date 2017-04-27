@@ -1,4 +1,7 @@
-function getBatch(pos_pairs, neg_pairs, p_size, n_size)
+function getBatch(pos_pairs, neg_pairs, modality)
+
+    local p_size = pos_pairs:size(1)
+    local n_size = neg_pairs:size(1)
 
     -- Choose positive and negative examples
     idxInPosPairs = torch.rand(posExamplesPerBatch):mul(p_size):ceil():long()
@@ -18,14 +21,30 @@ function getBatch(pos_pairs, neg_pairs, p_size, n_size)
     batch = {}
     batch.data = {}
     batch.label = {}
-    batch.data[I] = trainset[I]:index(1, batchIdxInTrainset:select(2,1)) -- TODO: Fix long conversion in root pos_pairs and neg_pairs
-    batch.data[X] = trainset[X]:index(1, batchIdxInTrainset:select(2,2))
-    batch.data[I] = batch.data[I]:cuda()
-    batch.data[X] = batch.data[X]:cuda()
-    batch.label[I] = train_labels_image:index(1, batchIdxInTrainset:select(2,1))
-    batch.label[X] = train_labels_text:index(1, batchIdxInTrainset:select(2,2))
-    batch.label[I] = batch.label[I]:cuda()
-    batch.label[X] = batch.label[X]:cuda()
+
+    if modality == 'C' then -- Cross Modal (Both modalities)
+        batch.data[I] = trainset[I]:index(1, batchIdxInTrainset:select(2,1)) -- TODO: Fix long conversion in root pos_pairs and neg_pairs
+        batch.data[X] = trainset[X]:index(1, batchIdxInTrainset:select(2,2))
+        batch.label[I] = train_labels_image:index(1, batchIdxInTrainset:select(2,1))
+        batch.label[X] = train_labels_text:index(1, batchIdxInTrainset:select(2,2))
+    elseif modality == 'I' then -- Image intramodal
+        batch.data[1] = trainset[I]:index(1, batchIdxInTrainset:select(2,1))
+        batch.data[2] = trainset[I]:index(1, batchIdxInTrainset:select(2,2))
+        batch.label[1] = train_labels_image:index(1, batchIdxInTrainset:select(2,1))
+        batch.label[2] = train_labels_image:index(1, batchIdxInTrainset:select(2,2))
+    elseif modality == 'X' then -- Text intramodal
+        batch.data[1] = trainset[X]:index(1, batchIdxInTrainset:select(2,1))
+        batch.data[2] = trainset[X]:index(1, batchIdxInTrainset:select(2,2))
+        batch.label[1] = train_labels_text:index(1, batchIdxInTrainset:select(2,1))
+        batch.label[2] = train_labels_text:index(1, batchIdxInTrainset:select(2,2))
+    else
+        print("Error: unrecognized modality in getBatch")
+    end
+
+    batch.data[1] = batch.data[1]:cuda()
+    batch.data[2] = batch.data[2]:cuda()
+    batch.label[1] = batch.label[1]:cuda()
+    batch.label[2] = batch.label[2]:cuda()
     batch.batch_sim_label_for_loss = batch_sim_label_for_loss:cuda()
 
     return batch

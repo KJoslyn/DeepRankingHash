@@ -40,8 +40,8 @@ function pickSubset(loadPairsFromFile)
 		neg_pairs:resize(n_idx - 1, 2)
 
 		subset_info = {}
-		subset_info.pos_pairs = pos_pairs
-		subset_info.neg_pairs = neg_pairs
+		subset_info.pos_pairs = pos_pairs -- Important- this is loaded later as pos_pairs full
+		subset_info.neg_pairs = neg_pairs -- Important- this is loaded later as neg_pairs full
 		subset_info.trainImages = trainImages
 		subset_info.trainTexts = trainTexts
 		subset_info.valImages = valImages
@@ -49,18 +49,23 @@ function pickSubset(loadPairsFromFile)
 	else
 		subset_info = torch.load(filePath .. 'subsetInfo.t7')
 
-		pos_pairs = subset_info.pos_pairs
-		neg_pairs = subset_info.neg_pairs
+		pos_pairs_full = subset_info.pos_pairs
+		neg_pairs_full = subset_info.neg_pairs
 		trainImages = subset_info.trainImages
 		trainTexts = subset_info.trainTexts
 		valImages = subset_info.valImages
 		valTexts = subset_info.valTexts
+
+		pos_pairs_image = subset_info.pos_pairs_image
+		neg_pairs_image = subset_info.neg_pairs_image
+		pos_pairs_text = subset_info.pos_pairs_text
+		neg_pairs_text = subset_info.neg_pairs_text
 	end
 
-	local p_size = pos_pairs:size(1)
-	local n_size = neg_pairs:size(1)
+	local p_size = pos_pairs_full:size(1)
+	local n_size = neg_pairs_full:size(1)
 
-	return pos_pairs, neg_pairs, trainImages, trainTexts, valImages, valTexts, p_size, n_size
+	return pos_pairs_full, neg_pairs_full, trainImages, trainTexts, valImages, valTexts, pos_pairs_image, neg_pairs_image, pos_pairs_text, neg_pairs_text
 end
 
 -- pos_pairs, neg_pairs, trainImages, trainTexts, valImages, valTexts, p_size, n_size = pickSubset(true)
@@ -138,4 +143,37 @@ function addSimRatio()
 
 	torch.save(filePath .. 'subsetInfo.t7', subset_info)
 
+end
+
+function getIntraModalPosAndNegPairs(sim_ratio_tr, trainIorT)
+
+	-- trainIorT should either be trainImages or trainTexts
+
+	local s_pos_pairs = torch.Tensor(5000*5000, 3) -- s for "single" modality
+	local s_neg_pairs = torch.LongTensor(5000*5000, 2)
+
+	local p_idx = 1
+	local n_idx = 1
+	for i = 1,5000 do
+		for j = 1,5000 do
+			if i ~= j then
+				local sr = sim_ratio_tr[trainIorT[i]][trainIorT[j]]
+				if sr == 0 then
+					s_neg_pairs[n_idx][1] = trainIorT[i]
+					s_neg_pairs[n_idx][2] = trainIorT[j]
+					n_idx = n_idx + 1
+				elseif sr > 0.5 then
+					s_pos_pairs[p_idx][1] = trainIorT[i]
+					s_pos_pairs[p_idx][2] = trainIorT[j]
+					s_pos_pairs[p_idx][3] = sr
+					p_idx = p_idx + 1
+				end
+            end
+		end
+	end
+
+	s_pos_pairs:resize(p_idx - 1, 3)
+	s_neg_pairs:resize(n_idx - 1, 2)
+
+	return s_pos_pairs, s_neg_pairs
 end
