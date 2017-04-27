@@ -33,9 +33,11 @@ function loadParamsAndPackages()
   g_modelType = 'gr' -- 'hgr', 'fc', 'hfc'
   L = 8
   k = 4
-  sim_label_type = 'fixed' -- 'Variable'
+  sim_label_type = 'fixed' -- 'variable'
   hashLayerSize = L * k
   baseLearningRate = 1e-6
+  baseLearningRateDecay = 0 -- 1e-3
+  baseMomentum = 0 -- .9
   baseWeightDecay = 0
   posExamplesPerBatch = 25 -- 20
   negExamplesPerBatch = 75 -- 100
@@ -149,7 +151,7 @@ function runEvals()
   statsPrint(string.format("I -> I val MAP = %.2f", IIv), sf, sfv)
 end
 
-function trainAndEvaluate(modality, numEpochs, arg1, arg2)
+function trainAndEvaluate(modality, numEpochs, evalInterval, arg1, arg2)
 
   local paramsAndOptimStatePrepared = arg1 and arg1 == 'skip' or arg2 and arg2 == 'skip'
   local logResults = arg1 and arg1 == 'log' or arg2 and arg2 == 'log'
@@ -169,7 +171,7 @@ function trainAndEvaluate(modality, numEpochs, arg1, arg2)
   for epoch = 1, numEpochs do
     doOneEpochOnModality(modality, epoch, logResults)
 
-    if epoch % 10 == 0 or epoch % 5 == 0 and modality ~= 'X' then
+    if epoch % evalInterval == 0 then
       runEvals()
     end
   end
@@ -192,8 +194,10 @@ function getAndShareParameters(modality)
 
     optimState_full = {
           learningRate = baseLearningRate,
+          learningRateDecay = baseLearningRateDecay,
           learningRates = learningRates_full,
-          weightDecays = weightDecays_full
+          weightDecays = weightDecays_full,
+          momentum = baseMomentum
     }
 
   end
@@ -206,8 +210,10 @@ function getAndShareParameters(modality)
 
     optimState_image = {
           learningRate = baseLearningRate,
+          learningRateDecay = baseLearningRateDecay,
           learningRates = learningRates_image,
-          weightDecays = weightDecays_image
+          weightDecays = weightDecays_image,
+          momentum = baseMomentum
     }
 
   end
@@ -220,8 +226,10 @@ function getAndShareParameters(modality)
 
     optimState_text = {
           learningRate = baseLearningRate,
+          learningRateDecay = baseLearningRateDecay,
           learningRates = learningRates_text,
-          weightDecays = weightDecays_text
+          weightDecays = weightDecays_text,
+          momentum = baseMomentum
     }
 
   end
