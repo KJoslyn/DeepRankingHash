@@ -153,6 +153,8 @@ end
 
 function trainAndEvaluate(modality, numEpochs, evalInterval, arg1, arg2)
 
+  criterion = getCriterion()
+
   local paramsAndOptimStatePrepared = arg1 and arg1 == 'skip' or arg2 and arg2 == 'skip'
   local logResults = arg1 and arg1 == 'log' or arg2 and arg2 == 'log'
 
@@ -163,10 +165,9 @@ function trainAndEvaluate(modality, numEpochs, evalInterval, arg1, arg2)
     sfv = io.open(snapshotDir .. "/stats_verbose_" .. dateStr .. ".txt", "w")
   end
 
-  if not paramsAndOptimStatePrepared then
-    criterion = getCriterion()
-    getAndShareParameters(modality)
-  end
+  -- if not paramsAndOptimStatePrepared then
+  --   getOptimStateAndShareParameters(modality)
+  -- end
 
   for epoch = 1, numEpochs do
     doOneEpochOnModality(modality, epoch, logResults)
@@ -183,7 +184,7 @@ function trainAndEvaluate(modality, numEpochs, evalInterval, arg1, arg2)
 
 end
 
-function getAndShareParameters(modality)
+function getOptimStateAndShareParameters(modality)
 
   if modality == 'C' or modality == 'A' then -- TODO: Implement 'A' modality
 
@@ -233,6 +234,16 @@ function getAndShareParameters(modality)
     }
 
   end
+end
+
+function changeLearningRateForClassifier(lrMult)
+
+  if not classifierWeightIndices then
+    classifierWeightIndices = optimState_full.learningRates:eq(1)
+    hashLayerIndices = optimState_full.learningRates:neq(1)
+  end
+  optimState_full.learningRates[classifierWeightIndices] = lrMult
+
 end
 
 function doOneEpochOnModality(modality, evalEpoch, logResults)
