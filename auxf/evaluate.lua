@@ -238,3 +238,22 @@ function randSort(vals)
 
     return ind:long()
 end
+
+function getHashCodeBitCounts()
+
+    local th = getHashCodes(trainset[X])
+    local ih = getHashCodes(trainset[I])
+    local ibc = torch.LongTensor(L,k)
+    local tbc = torch.LongTensor(L,k)
+    for i=1,L do
+        for j=1,k do
+            ibc[i][j] = torch.eq(ih:select(2,i),j):sum()
+            tbc[i][j] = torch.eq(th:select(2,i),j):sum()
+        end
+    end
+
+    hbc = {}
+    hbc[I] = ibc
+    hbc[X] = tbc
+    return hbc
+end

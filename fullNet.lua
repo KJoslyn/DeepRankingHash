@@ -252,7 +252,8 @@ function doOneEpochOnModality(modality, evalEpoch, logResults)
   batch_sim_label = torch.Tensor(posExamplesPerBatch):fill(1)
   batch_sim_label = batch_sim_label:cat(torch.Tensor(negExamplesPerBatch):fill(0))
   batch_sim_label = torch.CudaByteTensor(totNumExamplesPerBatch):copy(batch_sim_label)
-  batch_sim_label_for_loss_fixed = torch.CudaTensor(totNumExamplesPerBatch):copy(batch_sim_label) * L
+  batch_sim_label_for_loss_fixed = torch.CudaTensor(totNumExamplesPerBatch):copy(batch_sim_label) * L -- for MSECriterion
+  -- batch_sim_label_for_loss_fixed = torch.CudaTensor(totNumExamplesPerBatch):copy(batch_sim_label) -- for BCECriterion only
 
   local model, params, gradParams, optimState, pos_pairs, neg_pairs
 

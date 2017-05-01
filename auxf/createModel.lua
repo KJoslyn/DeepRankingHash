@@ -190,6 +190,7 @@ function createCombinedModel(imageHasher, textHasher)
 
     model:add(cnn_text)
     model:add(nn.DotProduct())
+    -- model:add(nn.MulConstant(1/L)) -- for BCECriterion implementation only
 
     model = model:cuda()
 
@@ -218,6 +219,7 @@ end
 function getCriterion()
 
     criterion = nn.MSECriterion()
+    -- criterion = nn.BCECriterion()
     criterion.sizeAverage = false
     criterion = criterion:cuda()
     return criterion
