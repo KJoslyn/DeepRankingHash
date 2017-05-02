@@ -255,5 +255,7 @@ function getHashCodeBitCounts()
     hbc = {}
     hbc[I] = ibc
     hbc[X] = tbc
-    return hbc
+    stdev_image = ibc:double():std()
+    stdev_text = tbc:double():std()
+    return hbc, stdev_image, stdev_text
 end

@@ -180,17 +180,77 @@ function createClassifierAndHasher(model, prevLayerSize, L, k, type, lrMultForHa
     return classifier, hasher
 end
 
-function createCombinedModel(imageHasher, textHasher)
+function createCombinedModel(hasher1, hasher2)
+
+    -- input to model is table of 4 tensors
+    -- 1: Image input
+    -- 2: Text input
+    -- 3: beta_im
+    -- 4: beta_te
 
     local model = nn.Sequential()
 
-    cnn_text = nn.ParallelTable()
-    cnn_text:add(imageHasher)
-    cnn_text:add(textHasher)
+    -- First stage: Image and text hasher, forward 3 and 4
 
-    model:add(cnn_text)
-    model:add(nn.DotProduct())
-    -- model:add(nn.MulConstant(1/L)) -- for BCECriterion implementation only
+    -- local con1 = nn.ConcatTable()
+    con1 = nn.ConcatTable()
+
+    -- local con1h1 = nn.Sequential()
+    con1h1 = nn.Sequential()
+    con1h1:add(nn.SelectTable(1))
+    con1h1:add(hasher1)
+
+    -- local con1h2 = nn.Sequential()
+    con1h2 = nn.Sequential()
+    con1h2:add(nn.SelectTable(2))
+    con1h2:add(hasher2)
+
+    con1:add(con1h1)
+    con1:add(con1h2)
+    con1:add(nn.SelectTable(3))
+    con1:add(nn.SelectTable(4))
+
+    model:add(con1)
+
+    -- Second Stage: Dot Product and regularizers
+
+    -- local con2 = nn.ConcatTable()
+    con2 = nn.ConcatTable()
+
+    -- local con2dot = nn.Sequential()
+    con2dot = nn.Sequential()
+    -- local con2dotSel = nn.ConcatTable()
+    con2dotSel = nn.ConcatTable()
+    con2dotSel:add(nn.SelectTable(1))
+    con2dotSel:add(nn.SelectTable(2))
+    con2dot:add(con2dotSel)
+    con2dot:add(nn.DotProduct())
+
+    -- local con2imReg = nn.Sequential()
+    con2imReg = nn.Sequential()
+    -- local con2imRegSel = nn.ConcatTable()
+    con2imRegSel = nn.ConcatTable()
+    con2imRegSel:add(nn.SelectTable(1))
+    con2imRegSel:add(nn.SelectTable(3))
+    con2imReg:add(con2imRegSel)
+    con2imReg:add(nn.CMulTable())
+    con2imReg:add(nn.Sum(2))
+
+    -- local con2teReg = nn.Sequential()
+    con2teReg = nn.Sequential()
+    -- local con2teRegSel = nn.ConcatTable()
+    con2teRegSel = nn.ConcatTable()
+    con2teRegSel:add(nn.SelectTable(2))
+    con2teRegSel:add(nn.SelectTable(4))
+    con2teReg:add(con2teRegSel)
+    con2teReg:add(nn.CMulTable())
+    con2teReg:add(nn.Sum(2))
+
+    con2:add(con2dot)
+    con2:add(con2imReg)
+    con2:add(con2teReg)
+
+    model:add(con2)
 
     model = model:cuda()
 
@@ -218,10 +278,33 @@ end
 
 function getCriterion()
 
-    criterion = nn.MSECriterion()
-    -- criterion = nn.BCECriterion()
-    criterion.sizeAverage = false
+    -- Cross-modal similarity criterion
+
+    criterion = nn.ParallelCriterion()
+
+    critSim = nn.MSECriterion()
+    critSim.sizeAverage = false
+
+    -- Bit balance criterions
+
+    critBalanceIm = nn.AbsCriterion()
+    critBalanceIm.sizeAverage = false
+
+    critBalanceTe = nn.AbsCriterion()
+    critBalanceTe.sizeAverage = false
+
+    -- Combined criterion
+
+    criterion:add(critSim, 0)
+    criterion:add(critBalanceIm)
+    criterion:add(critBalanceTe)
+
+    -- criterion = nn.MSECriterion()
+    -- -- criterion = nn.BCECriterion()
+    -- criterion.sizeAverage = false
+
     criterion = criterion:cuda()
+
     return criterion
 end
 

@@ -90,8 +90,8 @@ function loadFullModel(modelType, lrMultForHashLayer, loadSiameseModels)
   fullModel = createCombinedModel(imageHasher, textHasher)
 
   if loadSiameseModels then
-    imageSiameseModel = getSiameseHasher(imageHasher)
-    textSiameseModel = getSiameseHasher(textHasher)
+    imageSiameseModel = createCombinedModel(imageHasher, imageHasher:clone())
+    textSiameseModel = createCombinedModel(textHasher, textHasher:clone())
   end
 end
 
@@ -122,33 +122,37 @@ function runEvals()
 
   fullModel:evaluate()
 
-  imageAccuracy = calcClassAccuracyForModality(I)
-  textAccuracy = calcClassAccuracyForModality(X)
-  statsPrint(string.format('Image Classification Acc: %.2f', imageAccuracy), sf, sfv)
-  statsPrint(string.format('Text Classification Acc: %.2f', textAccuracy), sf, sfv)
+  hbc, stdev_image, stdev_text = getHashCodeBitCounts()
+  print(string.format("Stdev I = %.2f", stdev_image))
+  print(string.format("Stdev X = %.2f", stdev_text))
 
-  batchTextClassAcc = calcClassAccuracy(trainBatch.data[X], trainBatch.label[X])
-  batchImageClassAcc = calcClassAccuracy(trainBatch.data[I], trainBatch.label[I])-- TODO: This is not very useful because it is only for the last batch in the epoch
-  statsPrint(string.format("Batch Text Classification Acc = %.2f", batchTextClassAcc), sfv)
-  statsPrint(string.format("Batch Image Classification Acc = %.2f", batchImageClassAcc), sfv)
+  -- imageAccuracy = calcClassAccuracyForModality(I)
+  -- textAccuracy = calcClassAccuracyForModality(X)
+  -- statsPrint(string.format('Image Classification Acc: %.2f', imageAccuracy), sf, sfv)
+  -- statsPrint(string.format('Text Classification Acc: %.2f', textAccuracy), sf, sfv)
 
-  IXt = calcMAP(I, X, 'train')
-  XIt = calcMAP(X, I, 'train')
-  IXv = calcMAP(I, X, 'val')
-  XIv = calcMAP(X, I, 'val')
-  IIt = calcMAP(I, I, 'train')
-  XXt = calcMAP(X, X, 'train')
-  IIv = calcMAP(I, I, 'val')
-  XXv = calcMAP(X, X, 'val')
+  -- batchTextClassAcc = calcClassAccuracy(trainBatch.data[X], trainBatch.label[X])
+  -- batchImageClassAcc = calcClassAccuracy(trainBatch.data[I], trainBatch.label[I])-- TODO: This is not very useful because it is only for the last batch in the epoch
+  -- statsPrint(string.format("Batch Text Classification Acc = %.2f", batchTextClassAcc), sfv)
+  -- statsPrint(string.format("Batch Image Classification Acc = %.2f", batchImageClassAcc), sfv)
 
-  statsPrint(string.format("X -> I train MAP = %.2f", XIt), sf, sfv)
-  statsPrint(string.format("I -> X train MAP = %.2f", IXt), sf, sfv)
-  statsPrint(string.format("X -> X train MAP = %.2f", XXt), sf, sfv)
-  statsPrint(string.format("I -> I train MAP = %.2f", IIt), sf, sfv)
-  statsPrint(string.format("X -> I val MAP = %.2f", XIv), sf, sfv)
-  statsPrint(string.format("I -> X val MAP = %.2f", IXv), sf, sfv)
-  statsPrint(string.format("X -> X val MAP = %.2f", XXv), sf, sfv)
-  statsPrint(string.format("I -> I val MAP = %.2f", IIv), sf, sfv)
+  -- IXt = calcMAP(I, X, 'train')
+  -- XIt = calcMAP(X, I, 'train')
+  -- IXv = calcMAP(I, X, 'val')
+  -- XIv = calcMAP(X, I, 'val')
+  -- IIt = calcMAP(I, I, 'train')
+  -- XXt = calcMAP(X, X, 'train')
+  -- IIv = calcMAP(I, I, 'val')
+  -- XXv = calcMAP(X, X, 'val')
+
+  -- statsPrint(string.format("X -> I train MAP = %.2f", XIt), sf, sfv)
+  -- statsPrint(string.format("I -> X train MAP = %.2f", IXt), sf, sfv)
+  -- statsPrint(string.format("X -> X train MAP = %.2f", XXt), sf, sfv)
+  -- statsPrint(string.format("I -> I train MAP = %.2f", IIt), sf, sfv)
+  -- statsPrint(string.format("X -> I val MAP = %.2f", XIv), sf, sfv)
+  -- statsPrint(string.format("I -> X val MAP = %.2f", IXv), sf, sfv)
+  -- statsPrint(string.format("X -> X val MAP = %.2f", XXv), sf, sfv)
+  -- statsPrint(string.format("I -> I val MAP = %.2f", IIv), sf, sfv)
 end
 
 function trainAndEvaluate(modality, numEpochs, evalInterval, arg1, arg2)
@@ -299,17 +303,57 @@ function doOneEpochOnModality(modality, evalEpoch, logResults)
           trainBatch = getBatch(pos_pairs, neg_pairs, modality)
       end
 
+      imPred = imageHasher:forward(trainBatch.data[I])
+      tePred = textHasher:forward(trainBatch.data[X])
+      local batchSize = trainBatch.data[I]:size(1)
+      local trainSize = trainset[I]:size(1)
+      local trainEstimatorConst = trainSize / batchSize
+      -- beta_im_pre = torch.sum(imPred, 1):view(-1):mul(trainEstimatorConst)
+      -- beta_te_pre = torch.sum(tePred, 1):view(-1):mul(trainEstimatorConst)
+      -- local alpha = trainSize / k
+      local pred1, pred2
+      if modality == 'X' then
+        pred1 = tePred
+        pred2 = tePred
+      elseif modality == 'I' then
+        pred1 = imPred
+        pred2 = imPred
+      elseif modality == 'C' then
+        pred1 = imPred
+        pred2 = tePred
+      end
+
+      beta1 = torch.sum(pred1, 1):view(-1)
+      beta2 = torch.sum(pred2, 1):view(-1)
+      local alpha = batchSize / k
+      gamma1 = beta1 - 2*alpha
+      gamma2 = beta2 - 2*alpha
+      gamma1 = torch.expand(gamma1:resize(1,L*k), batchSize, L*k)
+      gamma2 = torch.expand(gamma2:resize(1,L*k), batchSize, L*k)
+      local bt = - L * (batchSize / k)
+      balance_target = torch.CudaTensor(batchSize):fill(bt)
+      
       function feval(x)
           -- get new parameters
           if x ~= params then -- TODO: This is never happening
             params:copy(x) 
           end         
 
-          input = trainBatch.data
+          input = {}
+          input[1] = trainBatch.data[I]
+          input[2] = trainBatch.data[X]
+          input[3] = gamma_im
+          input[4] = gamma_te
+
+          target = {}
+          target[2] = balance_target
+          target[3] = balance_target
+
+          -- input = trainBatch.data
           if sim_label_type == 'fixed' then
-            target = batch_sim_label_for_loss_fixed
+            target[1] = batch_sim_label_for_loss_fixed
           elseif sim_label_type == 'variable' then
-            target = trainBatch.batch_sim_label_for_loss
+            target[1] = trainBatch.batch_sim_label_for_loss
           end
           inputSize = input[1]:size(1)
 
