@@ -6,7 +6,7 @@ function getHashLayerFullyConnected(prevLayerSize, hashLayerSize, lrMultForHashL
 
     if addHiddenLayer then
         model:add(nn.Linear(prevLayerSize, prevLayerSize)
-                 :init('weight', nninit.xavier, {dist = 'normal', gain = 'relu'})
+                 :init('weight', nninit.xavier, {dist = 'normal'})
                  :learningRate('weight', lrMultForHashLayer))
         -- model:add(cudnn.ReLU(true))
         -- model:add(nn.Dropout(0.500000))
@@ -276,7 +276,7 @@ function getSiameseHasher(hasher)
     return model
 end
 
-function getCriterion()
+function getCriterion(balanceWeight)
 
     -- Cross-modal similarity criterion
 
@@ -295,9 +295,9 @@ function getCriterion()
 
     -- Combined criterion
 
-    criterion:add(critSim, 0)
-    criterion:add(critBalanceIm)
-    criterion:add(critBalanceTe)
+    criterion:add(critSim)
+    criterion:add(critBalanceIm, balanceWeight)
+    criterion:add(critBalanceTe, balanceWeight)
 
     -- criterion = nn.MSECriterion()
     -- -- criterion = nn.BCECriterion()

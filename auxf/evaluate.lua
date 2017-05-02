@@ -239,10 +239,12 @@ function randSort(vals)
     return ind:long()
 end
 
-function getHashCodeBitCounts()
+function getHashCodeBitCounts(data)
 
-    local th = getHashCodes(trainset[X])
-    local ih = getHashCodes(trainset[I])
+    -- data should be trainset or trainBatch.data
+
+    local th = getHashCodes(data[X])
+    local ih = getHashCodes(data[I])
     local ibc = torch.LongTensor(L,k)
     local tbc = torch.LongTensor(L,k)
     for i=1,L do
