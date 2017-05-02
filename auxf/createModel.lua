@@ -226,35 +226,49 @@ function createCombinedModel(hasher1, hasher2)
     con2dot:add(con2dotSel)
     con2dot:add(nn.DotProduct())
 
-    -- local con2imReg = nn.Sequential()
-    con2imReg = nn.Sequential()
-    -- local con2imRegSel = nn.ConcatTable()
-    con2imRegSel = nn.ConcatTable()
-    con2imRegSel:add(nn.SelectTable(1))
-    con2imRegSel:add(nn.SelectTable(3))
-    con2imReg:add(con2imRegSel)
-    con2imReg:add(nn.CMulTable())
-    con2imReg:add(nn.Sum(2))
-
-    -- local con2teReg = nn.Sequential()
-    con2teReg = nn.Sequential()
-    -- local con2teRegSel = nn.ConcatTable()
-    con2teRegSel = nn.ConcatTable()
-    con2teRegSel:add(nn.SelectTable(2))
-    con2teRegSel:add(nn.SelectTable(4))
-    con2teReg:add(con2teRegSel)
-    con2teReg:add(nn.CMulTable())
-    con2teReg:add(nn.Sum(2))
+    bitBalancer1 = getBitBalancer(1, 3)
+    bitBalancer2 = getBitBalancer(2, 4)
+    quantizer1 = getQuantizer(1)
+    quantizer2 = getQuantizer(2)
 
     con2:add(con2dot)
-    con2:add(con2imReg)
-    con2:add(con2teReg)
+    con2:add(bitBalancer1)
+    con2:add(bitBalancer2)
+    con2:add(quantizer1)
+    con2:add(quantizer2)
 
     model:add(con2)
 
     model = model:cuda()
 
     return model
+end
+
+function getBitBalancer(inputIdx1, inputIdx2)
+
+    local balancer = nn.Sequential()
+
+    local balancerCon = nn.ConcatTable()
+    balancerCon:add(nn.SelectTable(inputIdx1))
+    balancerCon:add(nn.SelectTable(inputIdx2))
+
+    balancer:add(balancerCon)
+    balancer:add(nn.CMulTable())
+    balancer:add(nn.Sum(2))
+
+    return balancer
+end
+
+function getQuantizer(inputIdx)
+
+    local quantizer = nn.Sequential()
+
+    quantizer:add(nn.SelectTable(inputIdx))
+    quantizer:add(nn.AddConstant(-.5))
+    quantizer:add(nn.Abs())
+    quantizer:add(nn.Sum(2))
+
+    return quantizer
 end
 
 function getSiameseHasher(hasher)
@@ -276,7 +290,7 @@ function getSiameseHasher(hasher)
     return model
 end
 
-function getCriterion(balanceWeight)
+function getCriterion(simWeight, balanceWeight, quantWeight)
 
     -- Cross-modal similarity criterion
 
@@ -293,11 +307,21 @@ function getCriterion(balanceWeight)
     critBalanceTe = nn.AbsCriterion()
     critBalanceTe.sizeAverage = false
 
+    -- Quantization criterions
+
+    critQuantIm = nn.AbsCriterion()
+    critQuantIm.sizeAverage = false
+
+    critQuantTe = nn.AbsCriterion()
+    critQuantTe.sizeAverage = false
+
     -- Combined criterion
 
-    criterion:add(critSim)
+    criterion:add(critSim, simWeight)
     criterion:add(critBalanceIm, balanceWeight)
     criterion:add(critBalanceTe, balanceWeight)
+    criterion:add(critQuantIm, quantWeight)
+    criterion:add(critQuantTe, quantWeight)
 
     -- criterion = nn.MSECriterion()
     -- -- criterion = nn.BCECriterion()

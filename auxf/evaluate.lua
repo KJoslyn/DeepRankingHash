@@ -132,12 +132,17 @@ function calcMAP(fromModality, toModality, trainOrVal)
     return mAP
 end
 
+function getRawPredictions(data)
+
+    return computeInBatches(calcRawPredictions, torch.CudaTensor(data:size(1), L*k), data, nil)
+end
+
 function getHashCodes(data)
 
     return computeInBatches(calcHashCodes, torch.CudaLongTensor(data:size(1), L), data, nil)
 end
 
-function calcRoundedOutput(data) 
+function calcRoundedClassifierOutput(data) 
     -- This function requires a global variable called "imageClassifier" or "textClassifier"
 
     if data:size(2) == 3 then -- Image modality
@@ -147,13 +152,19 @@ function calcRoundedOutput(data)
     end
 end
 
-function calcHashCodes(data)
+function calcRawPredictions(data)
+    -- This function requires a global variable called "imageClassifier" or "textClassifier"
 
     if data:size(2) == 3 then -- Image modality
-        pred = imageHasher:forward(data:cuda())
+        return imageHasher:forward(data:cuda())
     else -- Text modality
-        pred = textHasher:forward(data:cuda())
+        return textHasher:forward(data:cuda())
     end
+end
+
+function calcHashCodes(data)
+
+    pred = calcRawPredictions(data)
 
     reshapedInput = nn.Reshape(L,k):cuda():forward(pred)
     maxs, indices = torch.max(reshapedInput, 3)
@@ -182,7 +193,7 @@ end
 
 function calcClassAccuracy(data, labels)
 
-    roundedOutput = computeInBatches(calcRoundedOutput, torch.CudaTensor(data:size(1), 24), data)
+    roundedOutput = computeInBatches(calcRoundedClassifierOutput, torch.CudaTensor(data:size(1), 24), data)
 
     numInstances = data:size(1)
     dotProd = torch.CudaTensor(numInstances)
@@ -260,4 +271,13 @@ function getHashCodeBitCounts(data)
     stdev_image = ibc:double():std()
     stdev_text = tbc:double():std()
     return hbc, stdev_image, stdev_text
+end
+
+function getSoftMaxAvgDistFromOneHalf(modality)
+
+    local pred = getRawPredictions(trainset[modality])
+    pred = pred:view(-1)
+    local avgDist = torch.abs(pred - 0.5):mean()
+
+    return avgDist
 end

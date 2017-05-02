@@ -127,6 +127,10 @@ function runEvals()
   print(string.format("Stdev I = %.2f", stdev_image))
   print(string.format("Stdev X = %.2f", stdev_text))
 
+  print(string.format("Avg 0.5Dist I = %.3f", getSoftMaxAvgDistFromOneHalf(I)))
+  print(string.format("Avg 0.5Dist X = %.3f", getSoftMaxAvgDistFromOneHalf(X)))
+
+  --[[
   imageAccuracy = calcClassAccuracyForModality(I)
   textAccuracy = calcClassAccuracyForModality(X)
   statsPrint(string.format('Image Classification Acc: %.2f', imageAccuracy), sf, sfv)
@@ -154,6 +158,8 @@ function runEvals()
   statsPrint(string.format("I -> X val MAP = %.2f", IXv), sf, sfv)
   statsPrint(string.format("X -> X val MAP = %.2f", XXv), sf, sfv)
   statsPrint(string.format("I -> I val MAP = %.2f", IIv), sf, sfv)
+
+  --]]
 end
 
 function trainAndEvaluate(modality, numEpochs, evalInterval, arg1, arg2)
@@ -337,6 +343,8 @@ function getInputAndTarget(modality, trainBatch)
   -- local bt = - L * (trainSize / k)
   -- balance_target = torch.CudaTensor(batchSize):fill(bt)
 
+  quant_target = torch.CudaTensor(batchSize):fill(0.5*L*k)
+
   input = {}
   input[1] = trainBatch.data[1]
   input[2] = trainBatch.data[2]
@@ -351,6 +359,8 @@ function getInputAndTarget(modality, trainBatch)
   end
   target[2] = balance_target
   target[3] = balance_target
+  target[4] = quant_target
+  target[5] = quant_target
 
   return input, target
 end
@@ -379,6 +389,8 @@ function doOneEpochOnModality(modality, evalEpoch, logResults)
   crossModalEpochLoss = 0
   balance1EpochLoss = 0
   balance2EpochLoss = 0
+  quant1EpochLoss = 0
+  quant2EpochLoss = 0
 
   for batchNum = 0, numBatches - 1 do
 
@@ -411,6 +423,8 @@ function doOneEpochOnModality(modality, evalEpoch, logResults)
           crossModalEpochLoss = crossModalEpochLoss + critSim:forward(output[1], target[1])/inputSize
           balance1EpochLoss = balance1EpochLoss + critBalanceIm:forward(output[2], target[2])/inputSize
           balance2EpochLoss = balance2EpochLoss + critBalanceTe:forward(output[3], target[3])/inputSize
+          quant1EpochLoss = quant1EpochLoss + critQuantIm:forward(output[4], target[4])/inputSize
+          quant2EpochLoss = quant2EpochLoss + critQuantTe:forward(output[5], target[5])/inputSize
 
           return loss, gradParams
       end
@@ -424,6 +438,8 @@ function doOneEpochOnModality(modality, evalEpoch, logResults)
   statsPrint(string.format("Cross Avg Loss this epoch = %.2f", crossModalEpochLoss / numBatches), sf, sfv)
   statsPrint(string.format("Bal1 Avg Loss this epoch = %.2f", balance1EpochLoss / numBatches), sf, sfv)
   statsPrint(string.format("Bal2 Avg Loss this epoch = %.2f", balance2EpochLoss / numBatches), sf, sfv)
+  statsPrint(string.format("Quant1 Avg Loss this epoch = %.2f", quant1EpochLoss / numBatches), sf, sfv)
+  statsPrint(string.format("Quant2 Avg Loss this epoch = %.2f", quant2EpochLoss / numBatches), sf, sfv)
 
   if logResults and evalEpoch % 50 == 0 then
       local snapshotFile = snapshotDir .. "/snapshot_epoch_" .. epoch .. ".t7" 
