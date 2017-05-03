@@ -6,7 +6,7 @@ function getHashLayerFullyConnected(prevLayerSize, hashLayerSize, lrMultForHashL
 
     if addHiddenLayer then
         model:add(nn.Linear(prevLayerSize, prevLayerSize)
-                 :init('weight', nninit.xavier, {dist = 'normal', gain = 'relu'})
+                 :init('weight', nninit.xavier, {dist = 'normal'})
                  :learningRate('weight', lrMultForHashLayer))
         -- model:add(cudnn.ReLU(true))
         -- model:add(nn.Dropout(0.500000))
@@ -180,20 +180,95 @@ function createClassifierAndHasher(model, prevLayerSize, L, k, type, lrMultForHa
     return classifier, hasher
 end
 
-function createCombinedModel(imageHasher, textHasher)
+function createCombinedModel(hasher1, hasher2)
+
+    -- input to model is table of 4 tensors
+    -- 1: Image input
+    -- 2: Text input
+    -- 3: beta_im
+    -- 4: beta_te
 
     local model = nn.Sequential()
 
-    cnn_text = nn.ParallelTable()
-    cnn_text:add(imageHasher)
-    cnn_text:add(textHasher)
+    -- First stage: Image and text hasher, forward 3 and 4
 
-    model:add(cnn_text)
-    model:add(nn.DotProduct())
+    -- local con1 = nn.ConcatTable()
+    con1 = nn.ConcatTable()
+
+    -- local con1h1 = nn.Sequential()
+    con1h1 = nn.Sequential()
+    con1h1:add(nn.SelectTable(1))
+    con1h1:add(hasher1)
+
+    -- local con1h2 = nn.Sequential()
+    con1h2 = nn.Sequential()
+    con1h2:add(nn.SelectTable(2))
+    con1h2:add(hasher2)
+
+    con1:add(con1h1)
+    con1:add(con1h2)
+    con1:add(nn.SelectTable(3))
+    con1:add(nn.SelectTable(4))
+
+    model:add(con1)
+
+    -- Second Stage: Dot Product and regularizers
+
+    -- local con2 = nn.ConcatTable()
+    con2 = nn.ConcatTable()
+
+    -- local con2dot = nn.Sequential()
+    con2dot = nn.Sequential()
+    -- local con2dotSel = nn.ConcatTable()
+    con2dotSel = nn.ConcatTable()
+    con2dotSel:add(nn.SelectTable(1))
+    con2dotSel:add(nn.SelectTable(2))
+    con2dot:add(con2dotSel)
+    con2dot:add(nn.DotProduct())
+
+    bitBalancer1 = getBitBalancer(1, 3)
+    bitBalancer2 = getBitBalancer(2, 4)
+    quantizer1 = getQuantizer(1)
+    quantizer2 = getQuantizer(2)
+
+    con2:add(con2dot)
+    con2:add(bitBalancer1)
+    con2:add(bitBalancer2)
+    con2:add(quantizer1)
+    con2:add(quantizer2)
+
+    model:add(con2)
 
     model = model:cuda()
 
     return model
+end
+
+function getBitBalancer(inputIdx1, inputIdx2)
+
+    local balancer = nn.Sequential()
+
+    local balancerCon = nn.ConcatTable()
+    balancerCon:add(nn.SelectTable(inputIdx1))
+    balancerCon:add(nn.SelectTable(inputIdx2))
+
+    balancer:add(balancerCon)
+    balancer:add(nn.CMulTable())
+    balancer:add(nn.Sum(2))
+
+    return balancer
+end
+
+function getQuantizer(inputIdx)
+
+    local quantizer = nn.Sequential()
+
+    quantizer:add(nn.SelectTable(inputIdx))
+    quantizer:add(nn.AddConstant(-.5))
+    quantizer:add(nn.Abs())
+    quantizer:add(nn.Sum(2))
+
+    return quantizer
 end
 
 function getSiameseHasher(hasher)
@@ -215,11 +290,45 @@ function getSiameseHasher(hasher)
     return model
 end
 
-function getCriterion()
+function getCriterion(simWeight, balanceWeight, quantWeight)
 
-    criterion = nn.MSECriterion()
-    criterion.sizeAverage = false
+    -- Cross-modal similarity criterion
+
+    criterion = nn.ParallelCriterion()
+
+    critSim = nn.MSECriterion()
+    critSim.sizeAverage = false
+
+    -- Bit balance criterions
+
+    critBalanceIm = nn.AbsCriterion()
+    critBalanceIm.sizeAverage = false
+
+    critBalanceTe = nn.AbsCriterion()
+    critBalanceTe.sizeAverage = false
+
+    -- Quantization criterions
+
+    critQuantIm = nn.AbsCriterion()
+    critQuantIm.sizeAverage = false
+
+    critQuantTe = nn.AbsCriterion()
+    critQuantTe.sizeAverage = false
+
+    -- Combined criterion
+
+    criterion:add(critSim, simWeight)
+    criterion:add(critBalanceIm, balanceWeight)
+    criterion:add(critBalanceTe, balanceWeight)
+    criterion:add(critQuantIm, quantWeight)
+    criterion:add(critQuantTe, quantWeight)
+
+    -- criterion = nn.MSECriterion()
+    -- -- criterion = nn.BCECriterion()
+    -- criterion.sizeAverage = false
+
     criterion = criterion:cuda()
+
     return criterion
 end
 

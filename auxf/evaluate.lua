@@ -1,17 +1,101 @@
 
-function calcAndPrintHammingAccuracy(trainBatch, similarity_target, statsFile)
+-- //////////////////////////////
+-- These functions use computeInBatches with a "calc" function
+-- /////////////////////////////
 
-    imHash = getHashCodes(trainBatch.data[I])
-    teHash = getHashCodes(trainBatch.data[X])
+function getRawPredictions(data)
 
-    s = similarity_target:size(1)
+    return computeInBatches(calcRawPredictions, torch.CudaTensor(data:size(1), L*k), data, nil)
+end
 
-    for i = 4,8 do
-        similarity = torch.eq(imHash, teHash):sum(2):ge(i)
-        numCorrect = torch.eq(similarity, similarity_target):sum()
-        statsPrint(string.format("Accuracy%d = %.2f", i, numCorrect*100 / s), statsFile)
+function getHashCodes(data)
+
+    return computeInBatches(calcHashCodes, torch.CudaLongTensor(data:size(1), L), data, nil)
+end
+
+function getClassAccuracy(data, labels)
+
+    roundedOutput = computeInBatches(calcRoundedClassifierOutput, torch.CudaTensor(data:size(1), 24), data)
+
+    numInstances = data:size(1)
+    dotProd = torch.CudaTensor(numInstances)
+    for i = 1, numInstances do
+        dotProd[i] = torch.dot(roundedOutput[i], labels[i])
+    end
+    zero = torch.zeros(numInstances):cuda()
+    numCorrect = dotProd:gt(zero):sum()
+    accuracy = numCorrect * 100 / numInstances
+    
+    return accuracy
+end
+
+function getClassAccuracyForModality(modality)
+    if modality == I then
+        data = trainset[I]:index(1, trainImages)
+        labels = train_labels_image:float():index(1, trainImages):cuda() -- TODO: is float() necessary?
+    else
+        data = trainset[X]:index(1, trainTexts)
+        labels = train_labels_text:float():index(1, trainTexts):cuda()
+    end
+    return getClassAccuracy(data, labels)
+end
+
+-- //////////////////////////////
+-- These functions are to be used as input functions to computeInBatches
+-- /////////////////////////////
+
+function calcRoundedClassifierOutput(data) 
+    -- This function requires a global variable called "imageClassifier" or "textClassifier"
+
+    if data:size(2) == 3 then -- Image modality
+        return imageClassifier:cuda():forward(data:cuda()):round()
+    else -- Text modality
+        return textClassifier:cuda():forward(data:cuda()):round()
     end
 end
+
+function calcRawPredictions(data)
+    -- This function requires a global variable called "imageClassifier" or "textClassifier"
+
+    if data:size(2) == 3 then -- Image modality
+        return imageHasher:forward(data:cuda())
+    else -- Text modality
+        return textHasher:forward(data:cuda())
+    end
+end
+
+function calcHashCodes(data)
+
+    pred = calcRawPredictions(data)
+
+    reshapedInput = nn.Reshape(L,k):cuda():forward(pred)
+    maxs, indices = torch.max(reshapedInput, 3)
+    return indices
+end
+
+function computeInBatches(computeFunction, output, data) 
+
+    if data:size(2) == 1075 then -- Text modality
+        return computeFunction(data)
+    elseif data:size(2) == 3 then -- Image modality
+        N = data:size(1)
+        local batchSize = 128
+        local numBatches = torch.ceil(N / batchSize)
+        for b = 0, numBatches - 1 do
+            startIndex = b * batchSize + 1
+            endIndex = math.min((b + 1) * batchSize, N)
+            batch = data[{{ startIndex, endIndex }}]
+            output[{{ startIndex, endIndex}}] = computeFunction(batch)
+        end
+        return output    
+    else
+        print("Error: unrecognized modality")
+    end
+end
+
+-- //////////////////////////////
+-- mAP Functions
+-- /////////////////////////////
 
 function getQueryAndDBCodes(fromModality, toModality, trainOrVal)
 
@@ -62,6 +146,30 @@ function getQueryAndDBCodes(fromModality, toModality, trainOrVal)
     return queryCodes, databaseCodes, queryLabels, databaseLabels
 end
 
+function getQueryAndDBCodesTest(fromModality, toModality)
+
+    if fromModality == I then
+        queries = testset[I]
+        queryLabels = test_labels_image:float()
+    else
+        queries = testset[X]
+        queryLabels = test_labels_text:float()
+    end
+
+    if toModality == I then
+        database = trainset[I]
+        databaseLabels = train_labels_image:float()
+    else
+        database = trainset[X]
+        databaseLabels = train_labels_text:float()
+    end
+
+    queryCodes = getHashCodes(queries)
+    databaseCodes = getHashCodes(database)
+
+    return queryCodes, databaseCodes, queryLabels, databaseLabels
+end
+
 function getDistanceAndSimilarityForMAP(queryCodes, databaseCodes, queryLabels, databaseLabels)
 
     queryLabels = queryLabels:cuda()
@@ -84,137 +192,73 @@ function getDistanceAndSimilarityForMAP(queryCodes, databaseCodes, queryLabels, 
     return D, S
 end
 
-function calcMAP(fromModality, toModality, trainOrVal)
+function saveDistAndSimToMatFile(D,S)
 
-    K = 50
-
-    queryCodes, databaseCodes, queryLabels, databaseLabels = getQueryAndDBCodes(fromModality, toModality, trainOrVal)
-
-    -- Q = 1
-    Q = queryCodes:size(1)
-    sumAPs = 0
-    for q = 1,Q do
-        -- databaseCodes = torch.reshape(databaseCodes, 4000, L)
-        if fromModality == X then
-            query = torch.repeatTensor(queryCodes[q], databaseCodes:size(1), 1, 1)
-        else
-            query = torch.repeatTensor(queryCodes[q], databaseCodes:size(1), 1)
-        end
-
-        ne = torch.ne(query, databaseCodes):sum(2)
-        ne = torch.reshape(ne, ne:size(1))
-        topkResults, ind = torch.Tensor(ne:size(1)):copy(ne):topk(K)
-
-        ind2 = randSort(topkResults)
-        -- topkResults_sorted, ind2 = torch.sort(topkResults)
-        topkIndices = ind:index(1,ind2)
-
-        qLabel = queryLabels[q]
-
-        AP = 0
-        correct = 0
-        for k = 1,K do
-
-            kLabel = databaseLabels[topkIndices[k]]
-            dotProd = torch.dot(qLabel, kLabel)
-            if dotProd > 0 then
-                correct = correct + 1
-                AP = AP + (correct / k) -- add precision component
-            end
-        end
-        if correct > 0 then -- Correct should only be 0 if there are a small # of database objects and/or poorly trained
-            AP = AP / correct -- Recall component (divide by number of ground truth positives in top k)
-        end
-        sumAPs = sumAPs + AP
+    local D_new = torch.LongTensor(D:size(1),D:size(2)):copy(D)
+    local S_new = torch.LongTensor(S:size(1),S:size(2)):copy(S)
+    if not matio then
+        matio = require 'matio'
     end
-    mAP = sumAPs / Q
-
-    return mAP
+    date = os.date("*t", os.time())
+    dateStr = date.month .. "_" .. date.day .. "_" .. date.hour .. "_" .. date.min
+    matio.save(snapshotDir .. '/DS_data_' .. dateStr .. '.mat', {D=D_new,S=S_new})
 end
 
-function getHashCodes(data)
+function calcMAP(fromModality, toModality, trainValOrTest, saveToMatFile)
 
-    return computeInBatches(calcHashCodes, torch.CudaLongTensor(data:size(1), L), data, nil)
-end
+    fullModel:evaluate()
 
-function calcRoundedOutput(data) 
-    -- This function requires a global variable called "imageClassifier" or "textClassifier"
-
-    if data:size(2) == 3 then -- Image modality
-        return imageClassifier:cuda():forward(data:cuda()):round()
-    else -- Text modality
-        return textClassifier:cuda():forward(data:cuda()):round()
-    end
-end
-
-function calcHashCodes(data)
-
-    if data:size(2) == 3 then -- Image modality
-        pred = imageHasher:forward(data:cuda())
-    else -- Text modality
-        pred = textHasher:forward(data:cuda())
-    end
-
-    reshapedInput = nn.Reshape(L,k):cuda():forward(pred)
-    maxs, indices = torch.max(reshapedInput, 3)
-    return indices
-end
-
-function computeInBatches(computeFunction, output, data) 
-
-    if data:size(2) == 1075 then -- Text modality
-        return computeFunction(data)
-    elseif data:size(2) == 3 then -- Image modality
-        N = data:size(1)
-        local batchSize = 128
-        local numBatches = torch.ceil(N / batchSize)
-        for b = 0, numBatches - 1 do
-            startIndex = b * batchSize + 1
-            endIndex = math.min((b + 1) * batchSize, N)
-            batch = data[{{ startIndex, endIndex }}]
-            output[{{ startIndex, endIndex}}] = computeFunction(batch)
-        end
-        return output    
+    if trainValOrTest == 'test' then
+        queryCodes, databaseCodes, queryLabels, databaseLabels = getQueryAndDBCodesTest(fromModality, toModality, false)
     else
-        print("Error: unrecognized modality")
+        queryCodes, databaseCodes, queryLabels, databaseLabels = getQueryAndDBCodes(fromModality, toModality, trainValOrTest)
     end
+
+    databaseCodes = databaseCodes:reshape(databaseCodes:size(1), databaseCodes:size(2))
+    queryCodes = queryCodes:reshape(queryCodes:size(1), queryCodes:size(2))
+
+    if saveToMatFile then
+        local D, S = getDistanceAndSimilarityForMAP(queryCodes, databaseCodes, queryLabels, databaseLabels)
+        saveDistAndSimToMatFile(D,S)
+    end
+
+    -- return compute_map(queryCodes, databaseCodes, S)
+    return calcMAP_old(queryCodes, databaseCodes, queryLabels, databaseLabels)
 end
 
-function calcClassAccuracy(data, labels)
+function compute_map(test_data, train_data, similarities)
 
-    roundedOutput = computeInBatches(calcRoundedOutput, torch.CudaTensor(data:size(1), 24), data)
+  local test_codes = test_data:cuda()
+  local train_codes = train_data:cuda()
+  local smat = similarities:cuda()
 
-    numInstances = data:size(1)
-    dotProd = torch.CudaTensor(numInstances)
-    for i = 1, numInstances do
-        dotProd[i] = torch.dot(roundedOutput[i], labels[i])
-    end
-    zero = torch.zeros(numInstances):cuda()
-    numCorrect = dotProd:gt(zero):sum()
-    accuracy = numCorrect * 100 / numInstances
-    
-    return accuracy
-end
+  local ntest = test_codes:size()[1]
+  local ntrain = train_codes:size()[1]
 
-function calcClassAccuracyForModality(modality)
-    if modality == I then
-        data = trainset[I]:index(1, trainImages)
-        labels = train_labels_image:float():index(1, trainImages):cuda() -- TODO: is float() necessary?
-    else
-        data = trainset[X]:index(1, trainTexts)
-        labels = train_labels_text:float():index(1, trainTexts):cuda()
-    end
-    return calcClassAccuracy(data, labels)
-end
+  local pdist = -2*torch.mm(test_codes, train_codes:t())
 
-function statsPrint(line, statsFile1, statsFile2)
-    if statsFile1 then
-        statsFile1:write(line .. "\n")
-    end
-    if statsFile2 then
-        statsFile2:write(line .. "\n")
-    end
-    print(line)
+  pdist:add(train_codes:norm(2, 2):pow(2):t():expandAs(pdist))
+
+  local cind, rind, lind 
+  _, cind = torch.sort(pdist, 2)
+
+  rind = torch.linspace(1, ntest, ntest):repeatTensor(ntrain, 1):t():csub(1):long()
+
+  lind = torch.add(rind*ntrain, cind:long()):view(ntest*ntrain)
+  
+  local resmat, resmat_cumsum, prec_mat
+
+  resmat = smat:view(ntrain*ntest):index(1, lind):view(ntest, ntrain)
+
+  resmat_cumsum = resmat:cumsum(2)
+
+  prec_mat = torch.cdiv(resmat_cumsum, 
+    torch.linspace(1, ntrain, ntrain):view(1, ntrain):expandAs(resmat):cuda())
+
+  local mAP = torch.cmul(prec_mat, resmat):sum(2):cdiv(resmat:sum(2)):mean()
+
+  return mAP
+
 end
 
 function randSort(vals)
@@ -237,4 +281,68 @@ function randSort(vals)
     end
 
     return ind:long()
+end
+
+-- //////////////////////////////
+-- Regularizer evaluation functions
+-- /////////////////////////////
+
+function getHashCodeBitCounts(data)
+
+    -- data should be trainset or trainBatch.data
+
+    local th = getHashCodes(data[X])
+    local ih = getHashCodes(data[I])
+    local ibc = torch.LongTensor(L,k)
+    local tbc = torch.LongTensor(L,k)
+    for i=1,L do
+        for j=1,k do
+            ibc[i][j] = torch.eq(ih:select(2,i),j):sum()
+            tbc[i][j] = torch.eq(th:select(2,i),j):sum()
+        end
+    end
+
+    hbc = {}
+    hbc[I] = ibc
+    hbc[X] = tbc
+    stdev_image = ibc:double():std()
+    stdev_text = tbc:double():std()
+    return hbc, stdev_image, stdev_text
+end
+
+function getSoftMaxAvgDistFromOneHalf(modality)
+
+    local pred = getRawPredictions(trainset[modality])
+    pred = pred:view(-1)
+    local avgDist = torch.abs(pred - 0.5):mean()
+
+    return avgDist
+end
+
+-- //////////////////////////////
+-- Miscellaneous function 
+-- /////////////////////////////
+
+function statsPrint(line, statsFile1, statsFile2)
+    if statsFile1 then
+        statsFile1:write(line .. "\n")
+    end
+    if statsFile2 then
+        statsFile2:write(line .. "\n")
+    end
+    print(line)
+end
+
+function calcAndPrintHammingAccuracy(trainBatch, similarity_target, statsFile)
+
+    imHash = getHashCodes(trainBatch.data[I])
+    teHash = getHashCodes(trainBatch.data[X])
+
+    s = similarity_target:size(1)
+
+    for i = 4,8 do
+        similarity = torch.eq(imHash, teHash):sum(2):ge(i)
+        numCorrect = torch.eq(similarity, similarity_target):sum()
+        statsPrint(string.format("Accuracy%d = %.2f", i, numCorrect*100 / s), statsFile)
+    end
 end

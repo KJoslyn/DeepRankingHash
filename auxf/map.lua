@@ -1,6 +1,6 @@
 function calcMAPTest(fromModality, toModality, printToFile) -- TODO: Remove 3rd and 4th parameters
 
-    model:evaluate()
+    fullModel:evaluate()
 
     if printToFile then
         date = os.date("*t", os.time())
@@ -75,64 +75,48 @@ function calcMAPTest(fromModality, toModality, printToFile) -- TODO: Remove 3rd 
     return mAP
 end
 
-function getQueryAndDBCodesTest(fromModality, toModality)
+function calcMAP_old(queryCodes, databaseCodes, queryLabels, databaseLabels)
 
-    if fromModality == I then
-        queries = testset[I]
-        queryLabels = test_labels_image:float()
-    else
-        queries = testset[X]
-        queryLabels = test_labels_text:float()
-    end
+    K = 50
 
-    if toModality == I then
-        database = trainset[I]
-        databaseLabels = train_labels_image:float()
-    else
-        database = trainset[X]
-        databaseLabels = train_labels_text:float()
-    end
-
-    queryCodes = getHashCodes(queries)
-    databaseCodes = getHashCodes(database)
-
-    return queryCodes, databaseCodes, queryLabels, databaseLabels
-end
-
-function doGetDistanceAndSimilarityForMAPTest(fromModality, toModality, saveToMatFile)
-
-    queryCodes, databaseCodes, queryLabels, databaseLabels = getQueryAndDBCodesTest(fromModality, toModality)
-    D, S =  getDistanceAndSimilarityForMAP(queryCodes, databaseCodes, queryLabels, databaseLabels) -- in evaluate.lua. TODO: Make D, S local
-    local D_new = torch.LongTensor(D:size(1),D:size(2)):copy(D)
-    local S_new = torch.LongTensor(S:size(1),S:size(2)):copy(S)
-    if saveToMatFile then
-        if not matio then
-            matio = require 'matio'
+    -- Q = 1
+    Q = queryCodes:size(1)
+    sumAPs = 0
+    for q = 1,Q do
+        -- databaseCodes = torch.reshape(databaseCodes, 4000, L)
+        if fromModality == X then
+            query = torch.repeatTensor(queryCodes[q], databaseCodes:size(1), 1, 1)
+        else
+            query = torch.repeatTensor(queryCodes[q], databaseCodes:size(1), 1)
         end
-        date = os.date("*t", os.time())
-        dateStr = date.month .. "_" .. date.day .. "_" .. date.hour .. "_" .. date.min
-        matio.save(snapshotDir .. '/DS_data_' .. dateStr .. '.mat', {D=D_new,S=S_new})
-    end
-end
 
-function randSort(vals)
+        ne = torch.ne(query, databaseCodes):sum(2)
+        ne = torch.reshape(ne, ne:size(1))
+        topkResults, ind = torch.Tensor(ne:size(1)):copy(ne):topk(K)
 
-    local edges = {}
-    edges[1] = 1
-    local i = 2
-    for i = 2,vals:size(1) do
-        if vals[i] > vals[i-1] then
-            edges[#edges+1] = i
+        ind2 = randSort(topkResults)
+        -- topkResults_sorted, ind2 = torch.sort(topkResults)
+        topkIndices = ind:index(1,ind2)
+
+        qLabel = queryLabels[q]
+
+        AP = 0
+        correct = 0
+        for k = 1,K do
+
+            kLabel = databaseLabels[topkIndices[k]]
+            dotProd = torch.dot(qLabel, kLabel)
+            if dotProd > 0 then
+                correct = correct + 1
+                AP = AP + (correct / k) -- add precision component
+            end
         end
+        if correct > 0 then -- Correct should only be 0 if there are a small # of database objects and/or poorly trained
+            AP = AP / correct -- Recall component (divide by number of ground truth positives in top k)
+        end
+        sumAPs = sumAPs + AP
     end
-    edges[#edges+1] = vals:size(1) + 1
+    mAP = sumAPs / Q
 
-    local ind = torch.Tensor()
-    for e = 2,#edges do
-        local perm = torch.randperm(edges[e] - edges[e-1])
-        local perm = perm:add(edges[e-1] - 1)
-        ind = torch.cat(ind, perm)
-    end
-
-    return ind:long()
+    return mAP
 end
