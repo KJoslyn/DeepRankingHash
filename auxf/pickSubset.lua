@@ -1,14 +1,15 @@
--- function getKFoldSplit(kFold_pos_pairs, kFold_neg_pairs, pos_pair_splits, neg_pair_splits, kFold_images, kFold_texts, kNum)
+-- function getKFoldSplit(kFold_images, kFold_texts, kNum)
 function getKFoldSplit(kNum)
 
+	-- Currently, k fold split is not compatable with siamese models.
+
 	local K = kFold_images:size(1)
+	local splitSize = kFold_images:size(2)
 
 	trainImages = torch.LongTensor()
 	trainTexts = torch.LongTensor()
 	valImages = torch.LongTensor()
 	valTexts = torch.LongTensor()
-	pos_pairs = torch.Tensor()
-	neg_pairs = torch.LongTensor()
 
 	for k = 1,K do
 		if k == kNum then
@@ -17,67 +18,63 @@ function getKFoldSplit(kNum)
 		else
 			trainImages = trainImages:cat(kFold_images[k])
 			trainTexts = trainTexts:cat(kFold_texts[k])
-			pos_pairs = pos_pairs:cat(kFold_pos_pairs[ {{ pos_pair_splits[k], pos_pair_splits[k+1] - 1 }} ], 1)
-			neg_pairs = neg_pairs:cat(kFold_neg_pairs[ {{ neg_pair_splits[k], neg_pair_splits[k+1] - 1 }} ], 1)
 		end
 	end
-
-	return trainImages, trainTexts, valImages, valTexts, pos_pairs, neg_pairs
-end
-
-function pickKFoldSubset(splitSize, K)
-
-	local totSize = splitSize * K
 
 	if not sim_ratio_tr then
 		sim_ratio_tr = torch.load(filePath .. 'simRatioTr.t7')
 	end
 
-	totImages = torch.randperm(17251)
-	totTexts = torch.randperm(17251)
-
-	kFold_images = torch.LongTensor(K, splitSize)
-	kFold_texts = torch.LongTensor(K, splitSize)
-
-	local k = 0
-	for k = 1, K do
-		local startIdx = (k-1)*splitSize + 1
-		local endIdx = (k)*splitSize
-		kFold_images[k] = totImages[ {{ startIdx, endIdx }} ]
-		kFold_texts[k] = totTexts[ {{ startIdx, endIdx }} ]
-    end
-
-	kFold_pos_pairs = torch.Tensor(splitSize * splitSize * K, 3)
-	kFold_neg_pairs = torch.LongTensor(splitSize * splitSize * K, 2)
-
-	pos_pair_splits = torch.LongTensor(K+1)
-	neg_pair_splits = torch.LongTensor(K+1)
-	pos_pair_splits[1] = 1
-	neg_pair_splits[1] = 1
-
+	local Ntrain = trainImages:size(1)
+	pos_pairs = torch.Tensor(math.pow(Ntrain, 2), 3)
+	neg_pairs = torch.LongTensor(math.pow(Ntrain, 2), 2)
 	p_idx = 1
 	n_idx = 1
-	for k = 1, K do
-		for i = 1, splitSize do
-			for j = 1, splitSize do
-			    local sr = sim_ratio_tr[kFold_images[k][i]][kFold_texts[k][j]]
-				if sr == 0 then
-					kFold_neg_pairs[n_idx][1] = kFold_images[k][i]
-					kFold_neg_pairs[n_idx][2] = kFold_texts[k][j]
-					n_idx = n_idx + 1
-				elseif sr > 0.5 then
-					kFold_pos_pairs[p_idx][1] = kFold_images[k][i]
-					kFold_pos_pairs[p_idx][2] = kFold_texts[k][j]
-					pos_pairs[k][p_idx][3] = sr
-					p_idx = p_idx + 1
-				end
+	for i = 1, Ntrain do
+		for j = 1, Ntrain do
+			local sr = sim_ratio_tr[trainImages[i]][trainTexts[j]]
+			if sr == 0 then
+				neg_pairs[n_idx][1] = trainImages[i]
+				neg_pairs[n_idx][2] = trainTexts[j]
+				n_idx = n_idx + 1
+			elseif sr > 0.5 then
+				pos_pairs[p_idx][1] = trainImages[i]
+				pos_pairs[p_idx][2] = trainTexts[j]
+				pos_pairs[p_idx][3] = sr
+				p_idx = p_idx + 1
 			end
-        end
-		pos_pair_splits[k+1] = p_idx
-		neg_pair_splits[k+1] = n_idx
+		end
+	end
+
+	pos_pairs:resize(p_idx - 1, 3)
+	neg_pairs:resize(n_idx - 1, 2)
+
+    return pos_pairs, neg_pairs, trainImages, trainTexts, valImages, valTexts
+end
+
+function pickKFoldSubset(splitSize, K, loadPairsFromFile)
+
+	if loadPairsFromFile then
+		local subset_info = torch.load(filePath .. 'kFoldSubsetInfo.t7')
+		kFold_images = subset_info.kFold_images
+		kFold_texts = subset_info.kFold_texts
+	else
+		local totImages = torch.randperm(17251)
+		local totTexts = torch.randperm(17251)
+
+		kFold_images = torch.LongTensor(K, splitSize)
+		kFold_texts = torch.LongTensor(K, splitSize)
+
+		local k = 0
+		for k = 1, K do
+			local startIdx = (k-1)*splitSize + 1
+			local endIdx = (k)*splitSize
+			kFold_images[k] = totImages[ {{ startIdx, endIdx }} ]
+			kFold_texts[k] = totTexts[ {{ startIdx, endIdx }} ]
+		end
     end
-	kFold_pos_pairs:resize(p_idx - 1, 3)
-	kFold_neg_pairs:resize(n_idx - 1, 2)
+
+	-- return kFold_images, kFold_texts
 end
 
 function pickSubset(loadPairsFromFile)

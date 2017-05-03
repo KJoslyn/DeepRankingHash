@@ -99,9 +99,6 @@ end
 
 function getQueryAndDBCodes(fromModality, toModality, trainOrVal)
 
-    -- local numQueries = 5000
-    -- local numDatabase = 5000
-
     local endIdx = nil
     local imageIdxSet = nil
     local textIdxSet = nil
@@ -110,11 +107,11 @@ function getQueryAndDBCodes(fromModality, toModality, trainOrVal)
     -- used in training or validation respectively. They index trainset[modality]. Only 5000 images and 5000 texts are used for training,
     -- and 1000 images and 1000 texts are used for validation.
     if trainOrVal == 'train' then
-        endIdx = 5000
+        endIdx = trainImages:size(1)
         imageIdxSet = trainImages
         textIdxSet = trainTexts
     elseif trainOrVal == 'val' then
-        endIdx = 1000
+        endIdx = valImages:size(1)
         imageIdxSet = valImages
         textIdxSet = valTexts
     else

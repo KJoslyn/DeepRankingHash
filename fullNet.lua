@@ -21,7 +21,7 @@ function loadStandardPackages()
 
 end -- end loadPackages()
 
-function loadParamsAndPackages()
+function loadParamsAndPackages(iterationsPerEpoch)
 
   if not nn then
     loadStandardPackages()
@@ -41,7 +41,9 @@ function loadParamsAndPackages()
   baseWeightDecay = 0
   posExamplesPerBatch = 25 -- 20
   negExamplesPerBatch = 75 -- 100
-  iterationsPerEpoch = 100
+  -- iterationsPerEpoch = 100
+  kFoldSplitSize = 500
+  kFoldNumSplits = 5
 
   -- These are inferred from above
   posExamplesPerEpoch = posExamplesPerBatch*iterationsPerEpoch
@@ -66,6 +68,7 @@ function loadParamsAndPackages()
   reloadAuxfPackage('dataLoader')
   reloadAuxfPackage('batchLoader')
   reloadAuxfPackage('createModel')
+  reloadAuxfPackage('map')
 end
 
 function reloadAuxfPackage(pname)
@@ -77,7 +80,6 @@ end
 function loadFullModel(modelType, lrMultForHashLayer, loadSiameseModels)
 
   collectgarbage()
-  loadParamsAndPackages()
 
   if not modelType then
     modelType = g_modelType
@@ -113,11 +115,23 @@ function loadData()
       trainset[X], testset[X], train_labels_text, test_labels_text = getTextData()
   end
 
-  if not pos_pairs_full then
-      pos_pairs_full, neg_pairs_full, trainImages, trainTexts, valImages, valTexts, pos_pairs_image, neg_pairs_image, pos_pairs_text, neg_pairs_text = pickSubset(true)
-  end
+  -- if not pos_pairs_full then
+  --     pos_pairs_full, neg_pairs_full, trainImages, trainTexts, valImages, valTexts, pos_pairs_image, neg_pairs_image, pos_pairs_text, neg_pairs_text = pickSubset(true)
+  -- end
 
 end -- end loadData()
+
+function loadTrainAndValSubsets(kNum)
+
+  if not kNum then
+      pos_pairs_full, neg_pairs_full, trainImages, trainTexts, valImages, valTexts, pos_pairs_image, neg_pairs_image, pos_pairs_text, neg_pairs_text = pickSubset(true)
+  else
+      if not kFold_images then
+        pickKFoldSubset(kFoldSplitSize, kFoldNumSplits, true)
+      end
+      pos_pairs_full, neg_pairs_full, trainImages, trainTexts, valImages, valTexts = getKFoldSplit(kNum)
+  end
+end
 
 function runEvals()
 
@@ -430,7 +444,7 @@ function doOneEpochOnModality(modality, evalEpoch, logResults)
 
   end
 
-  statsPrint("=== " .. modality .. " ===Epoch " .. evalEpoch, sf, sfv)
+  statsPrint(string.format("=== %s ===Epoch %d", modality, torch.round(optimState.evalCounter / iterationsPerEpoch)), sf, sfv)
   -- calcAndPrintHammingAccuracy(trainBatch, batch_sim_label, sfv) -- TODO: This is not very useful because it is only for the last batch in the epoch
   statsPrint(string.format("Avg Loss this epoch = %.2f", epochLoss / numBatches), sf, sfv)
   statsPrint(string.format("Cross Avg Loss this epoch = %.2f", crossModalEpochLoss / numBatches), sf, sfv)
@@ -452,10 +466,12 @@ function doOneEpochOnModality(modality, evalEpoch, logResults)
   end
 end
 
-function runEverything(modelType, lrMultForHashLayer, modality, simWeight, balanceWeight, quantWeight)
+function runEverything(modelType, lrMultForHashLayer, kNum, modality, simWeight, balanceWeight, quantWeight)
 
+  loadParamsAndPackages()
   loadFullModel(modelType, lrMultForHashLayer)
   loadData()
+  loadTrainAndValSubsets(kNum)
   getOptimStateAndShareParameters(modality)
   doGetCriterion(simWeight, balanceWeight, quantWeight)
 
