@@ -130,14 +130,13 @@ function runEvals()
   print(string.format("Avg 0.5Dist I = %.3f", getSoftMaxAvgDistFromOneHalf(I)))
   print(string.format("Avg 0.5Dist X = %.3f", getSoftMaxAvgDistFromOneHalf(X)))
 
-  --[[
-  imageAccuracy = calcClassAccuracyForModality(I)
-  textAccuracy = calcClassAccuracyForModality(X)
+  imageAccuracy = getClassAccuracyForModality(I)
+  textAccuracy = getClassAccuracyForModality(X)
   statsPrint(string.format('Image Classification Acc: %.2f', imageAccuracy), sf, sfv)
   statsPrint(string.format('Text Classification Acc: %.2f', textAccuracy), sf, sfv)
 
-  batchTextClassAcc = calcClassAccuracy(trainBatch.data[X], trainBatch.label[X])
-  batchImageClassAcc = calcClassAccuracy(trainBatch.data[I], trainBatch.label[I])-- TODO: This is not very useful because it is only for the last batch in the epoch
+  batchTextClassAcc = getClassAccuracy(trainBatch.data[X], trainBatch.label[X])
+  batchImageClassAcc = getClassAccuracy(trainBatch.data[I], trainBatch.label[I])-- TODO: This is not very useful because it is only for the last batch in the epoch
   statsPrint(string.format("Batch Text Classification Acc = %.2f", batchTextClassAcc), sfv)
   statsPrint(string.format("Batch Image Classification Acc = %.2f", batchImageClassAcc), sfv)
 
@@ -159,7 +158,6 @@ function runEvals()
   statsPrint(string.format("X -> X val MAP = %.2f", XXv), sf, sfv)
   statsPrint(string.format("I -> I val MAP = %.2f", IIv), sf, sfv)
 
-  --]]
 end
 
 function trainAndEvaluate(modality, numEpochs, evalInterval, arg1, arg2)
@@ -193,8 +191,8 @@ function trainAndEvaluate(modality, numEpochs, evalInterval, arg1, arg2)
 
 end
 
-function doGetCriterion(balanceWeight)
-  criterion = getCriterion(balanceWeight)
+function doGetCriterion(simWeight, balanceWeight, quantWeight)
+  criterion = getCriterion(simWeight, balanceWeight, quantWeight)
 end
 
 function getOptimStateAndShareParameters(modality)
@@ -452,4 +450,13 @@ function doOneEpochOnModality(modality, evalEpoch, logResults)
       end
       torch.save(snapshotFile, snapshot)
   end
+end
+
+function runEverything(modelType, lrMultForHashLayer, modality, simWeight, balanceWeight, quantWeight)
+
+  loadFullModel(modelType, lrMultForHashLayer)
+  loadData()
+  getOptimStateAndShareParameters(modality)
+  doGetCriterion(simWeight, balanceWeight, quantWeight)
+
 end

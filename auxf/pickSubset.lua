@@ -93,7 +93,7 @@ function pickValSet()
 	valImages = torch.Tensor(1000)
 	valTexts = torch.Tensor(1000)
 
-	imagePerm = torch.randperm(6000)
+	imagePerm = torch.randperm(6000) -- absolute worst case: first 5000 picked are in the trainset already, so need 1000 more
 	local permIdx = 1
 	local valIdx = 1
 	while (valIdx <= 1000) do
