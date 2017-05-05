@@ -1,11 +1,11 @@
 function calcMAPTest(fromModality, toModality, printToFile) -- TODO: Remove 3rd and 4th parameters
 
-    fullModel:evaluate()
+    m.fullModel:evaluate()
 
     if printToFile then
         date = os.date("*t", os.time())
         dateStr = date.month .. "_" .. date.day .. "_" .. date.hour .. "_" .. date.min
-        outputFile = io.open(snapshotDir .. "/exampleRetrievals_" .. dateStr .. ".txt", "w")
+        outputFile = io.open(g.snapshotDir .. "/exampleRetrievals_" .. dateStr .. ".txt", "w")
     end
 
     K = 50
@@ -21,7 +21,7 @@ function calcMAPTest(fromModality, toModality, printToFile) -- TODO: Remove 3rd 
             outputFile:write("Query " .. q .. "\n")
         end
 
-        -- databaseCodes = torch.reshape(databaseCodes, 4000, L)
+        -- databaseCodes = torch.reshape(databaseCodes, 4000, p.L)
         if fromModality == X then
             query = torch.repeatTensor(queryCodes[q], databaseCodes:size(1), 1, 1)
         else
@@ -83,7 +83,7 @@ function calcMAP_old(queryCodes, databaseCodes, queryLabels, databaseLabels)
     Q = queryCodes:size(1)
     sumAPs = 0
     for q = 1,Q do
-        -- databaseCodes = torch.reshape(databaseCodes, 4000, L)
+        -- databaseCodes = torch.reshape(databaseCodes, 4000, p.L)
         if fromModality == X then
             query = torch.repeatTensor(queryCodes[q], databaseCodes:size(1), 1, 1)
         else

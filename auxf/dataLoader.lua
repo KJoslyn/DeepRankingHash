@@ -13,11 +13,11 @@ function getImageData(small)
         testImageDataFile = 'mirflickr_testset.t7'
     end
 
-    train_images = torch.load(filePath .. 'CNN Model/' .. trainImageDataFile)
-    test_images = torch.load(filePath .. 'CNN Model/' .. testImageDataFile)
+    local train_images = torch.load(g.filePath .. 'CNN Model/' .. trainImageDataFile)
+    local test_images = torch.load(g.filePath .. 'CNN Model/' .. testImageDataFile)
 
-    mean = {} -- store the mean, to normalize the test set in the future
-    stdv  = {} -- store the standard-deviation for the future
+    local mean = {} -- store the mean, to normalize the test set in the future
+    local stdv  = {} -- store the standard-deviation for the future
     for i=1,3 do -- over each image channel
         mean[i] = train_images.data[{ {}, {i}, {}, {}  }]:mean() -- mean estimation
         train_images.data[{ {}, {i}, {}, {}  }]:add(-mean[i]) -- mean subtraction
@@ -35,11 +35,11 @@ end
 
 function getTextData()
 
-    local train_texts = torch.load(filePath .. 'mirTagTr.t7')
-    local test_texts = torch.load(filePath .. 'mirTagTe.t7')
+    local train_texts = torch.load(g.filePath .. 'mirTagTr.t7')
+    local test_texts = torch.load(g.filePath .. 'mirTagTe.t7')
 
-    local train_labels_text = torch.load(filePath .. 'mirflickrLabelTr.t7') -- load from t7 file
-    local test_labels_text = torch.load(filePath .. 'mirflickrLabelTe.t7') -- load from t7 file
+    local train_labels_text = torch.load(g.filePath .. 'mirflickrLabelTr.t7') -- load from t7 file
+    local test_labels_text = torch.load(g.filePath .. 'mirflickrLabelTe.t7') -- load from t7 file
 
     return train_texts.T_tr, test_texts.T_te, train_labels_text.L_tr, test_labels_text.L_te
 end

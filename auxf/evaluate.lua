@@ -5,12 +5,12 @@
 
 function getRawPredictions(data)
 
-    return computeInBatches(calcRawPredictions, torch.CudaTensor(data:size(1), L*k), data, nil)
+    return computeInBatches(calcRawPredictions, torch.CudaTensor(data:size(1), p.L*p.k), data, nil)
 end
 
 function getHashCodes(data)
 
-    return computeInBatches(calcHashCodes, torch.CudaLongTensor(data:size(1), L), data, nil)
+    return computeInBatches(calcHashCodes, torch.CudaLongTensor(data:size(1), p.L), data, nil)
 end
 
 function getClassAccuracy(data, labels)
@@ -31,11 +31,11 @@ end
 
 function getClassAccuracyForModality(modality)
     if modality == I then
-        data = trainset[I]:index(1, trainImages)
-        labels = train_labels_image:float():index(1, trainImages):cuda() -- TODO: is float() necessary?
+        data = d.trainset[I]:index(1, d.trainImages)
+        labels = d.train_labels_image:float():index(1, d.trainImages):cuda() -- TODO: is float() necessary?
     else
-        data = trainset[X]:index(1, trainTexts)
-        labels = train_labels_text:float():index(1, trainTexts):cuda()
+        data = d.trainset[X]:index(1, d.trainTexts)
+        labels = d.train_labels_text:float():index(1, d.trainTexts):cuda()
     end
     return getClassAccuracy(data, labels)
 end
@@ -45,22 +45,20 @@ end
 -- /////////////////////////////
 
 function calcRoundedClassifierOutput(data) 
-    -- This function requires a global variable called "imageClassifier" or "textClassifier"
 
     if data:size(2) == 3 then -- Image modality
-        return imageClassifier:cuda():forward(data:cuda()):round()
+        return m.imageClassifier:cuda():forward(data:cuda()):round()
     else -- Text modality
-        return textClassifier:cuda():forward(data:cuda()):round()
+        return m.textClassifier:cuda():forward(data:cuda()):round()
     end
 end
 
 function calcRawPredictions(data)
-    -- This function requires a global variable called "imageClassifier" or "textClassifier"
 
     if data:size(2) == 3 then -- Image modality
-        return imageHasher:forward(data:cuda())
+        return m.imageHasher:forward(data:cuda())
     else -- Text modality
-        return textHasher:forward(data:cuda())
+        return m.textHasher:forward(data:cuda())
     end
 end
 
@@ -68,7 +66,7 @@ function calcHashCodes(data)
 
     pred = calcRawPredictions(data)
 
-    reshapedInput = nn.Reshape(L,k):cuda():forward(pred)
+    reshapedInput = nn.Reshape(p.L,p.k):cuda():forward(pred)
     maxs, indices = torch.max(reshapedInput, 3)
     return indices
 end
@@ -78,12 +76,12 @@ function computeInBatches(computeFunction, output, data)
     if data:size(2) == 1075 then -- Text modality
         return computeFunction(data)
     elseif data:size(2) == 3 then -- Image modality
-        N = data:size(1)
+        local N = data:size(1)
         local batchSize = 128
         local numBatches = torch.ceil(N / batchSize)
         for b = 0, numBatches - 1 do
-            startIndex = b * batchSize + 1
-            endIndex = math.min((b + 1) * batchSize, N)
+            local startIndex = b * batchSize + 1
+            local endIndex = math.min((b + 1) * batchSize, N)
             batch = data[{{ startIndex, endIndex }}]
             output[{{ startIndex, endIndex}}] = computeFunction(batch)
         end
@@ -103,17 +101,17 @@ function getQueryAndDBCodes(fromModality, toModality, trainOrVal)
     local imageIdxSet = nil
     local textIdxSet = nil
 
-    -- trainImages, trainTexts, valImages, and valTexts come from pickSubset.lua. They are the indices of the images and texts that are
-    -- used in training or validation respectively. They index trainset[modality]. Only 5000 images and 5000 texts are used for training,
+    -- d.trainImages, d.trainTexts, d.valImages, and d.valTexts come from pickSubset.lua. They are the indices of the images and texts that are
+    -- used in training or validation respectively. They index d.trainset[modality]. Only 5000 images and 5000 texts are used for training,
     -- and 1000 images and 1000 texts are used for validation.
     if trainOrVal == 'train' then
-        endIdx = trainImages:size(1)
-        imageIdxSet = trainImages
-        textIdxSet = trainTexts
+        endIdx = d.trainImages:size(1)
+        imageIdxSet = d.trainImages
+        textIdxSet = d.trainTexts
     elseif trainOrVal == 'val' then
-        endIdx = valImages:size(1)
-        imageIdxSet = valImages
-        textIdxSet = valTexts
+        endIdx = d.valImages:size(1)
+        imageIdxSet = d.valImages
+        textIdxSet = d.valTexts
     else
         print("Error: input to getQueryAndDBCodes must be \'train\' or \'val\'")
     end
@@ -122,19 +120,19 @@ function getQueryAndDBCodes(fromModality, toModality, trainOrVal)
     texts = textIdxSet[ {{ 1, endIdx }} ]:long()
 
     if fromModality == I then
-        queries = trainset[I]:index(1, images)
-        queryLabels = train_labels_image:float():index(1, images)
+        queries = d.trainset[I]:index(1, images)
+        queryLabels = d.train_labels_image:float():index(1, images)
     else
-        queries = trainset[X]:index(1, texts)
-        queryLabels = train_labels_text:float():index(1, texts)
+        queries = d.trainset[X]:index(1, texts)
+        queryLabels = d.train_labels_text:float():index(1, texts)
     end
 
     if toModality == I then
-        database = trainset[I]:index(1, images)
-        databaseLabels = train_labels_image:float():index(1, images)
+        database = d.trainset[I]:index(1, images)
+        databaseLabels = d.train_labels_image:float():index(1, images)
     else
-        database = trainset[X]:index(1, texts)
-        databaseLabels = train_labels_text:float():index(1, texts)
+        database = d.trainset[X]:index(1, texts)
+        databaseLabels = d.train_labels_text:float():index(1, texts)
     end
 
     queryCodes = getHashCodes(queries)
@@ -146,19 +144,19 @@ end
 function getQueryAndDBCodesTest(fromModality, toModality)
 
     if fromModality == I then
-        queries = testset[I]
-        queryLabels = test_labels_image:float()
+        queries = d.testset[I]
+        queryLabels = d.test_labels_image:float()
     else
-        queries = testset[X]
-        queryLabels = test_labels_text:float()
+        queries = d.testset[X]
+        queryLabels = d.test_labels_text:float()
     end
 
     if toModality == I then
-        database = trainset[I]
-        databaseLabels = train_labels_image:float()
+        database = d.trainset[I]
+        databaseLabels = d.train_labels_image:float()
     else
-        database = trainset[X]
-        databaseLabels = train_labels_text:float()
+        database = d.trainset[X]
+        databaseLabels = d.train_labels_text:float()
     end
 
     queryCodes = getHashCodes(queries)
@@ -179,7 +177,7 @@ function getDistanceAndSimilarityForMAP(queryCodes, databaseCodes, queryLabels, 
     S = torch.CudaTensor(numQueries, numDB)
     sumAPs = 0
     for q = 1,numQueries do
-        queryCodeRep = torch.expand(queryCodes[q]:reshape(L,1), L, numDB):transpose(1,2)
+        queryCodeRep = torch.expand(queryCodes[q]:reshape(p.L,1), p.L, numDB):transpose(1,2)
         D[q] = torch.ne(queryCodeRep, databaseCodes):sum(2)
 
         queryLabelRep = torch.expand(queryLabels[q]:reshape(24,1), 24, numDB):transpose(1,2)
@@ -198,12 +196,12 @@ function saveDistAndSimToMatFile(D,S)
     end
     date = os.date("*t", os.time())
     dateStr = date.month .. "_" .. date.day .. "_" .. date.hour .. "_" .. date.min
-    matio.save(snapshotDir .. '/DS_data_' .. dateStr .. '.mat', {D=D_new,S=S_new})
+    matio.save(g.snapshotDir .. '/DS_data_' .. dateStr .. '.mat', {D=D_new,S=S_new})
 end
 
 function calcMAP(fromModality, toModality, trainValOrTest, saveToMatFile)
 
-    fullModel:evaluate()
+    m.fullModel:evaluate()
 
     if trainValOrTest == 'test' then
         queryCodes, databaseCodes, queryLabels, databaseLabels = getQueryAndDBCodesTest(fromModality, toModality, false)
@@ -286,14 +284,14 @@ end
 
 function getHashCodeBitCounts(data)
 
-    -- data should be trainset or trainBatch.data
+    -- data should be d.trainset or trainBatch.data
 
     local th = getHashCodes(data[X])
     local ih = getHashCodes(data[I])
-    local ibc = torch.LongTensor(L,k)
-    local tbc = torch.LongTensor(L,k)
-    for i=1,L do
-        for j=1,k do
+    local ibc = torch.LongTensor(p.L,p.k)
+    local tbc = torch.LongTensor(p.L,p.k)
+    for i=1,p.L do
+        for j=1,p.k do
             ibc[i][j] = torch.eq(ih:select(2,i),j):sum()
             tbc[i][j] = torch.eq(th:select(2,i),j):sum()
         end
@@ -309,7 +307,7 @@ end
 
 function getSoftMaxAvgDistFromOneHalf(modality)
 
-    local pred = getRawPredictions(trainset[modality])
+    local pred = getRawPredictions(d.trainset[modality])
     pred = pred:view(-1)
     local avgDist = torch.abs(pred - 0.5):mean()
 
