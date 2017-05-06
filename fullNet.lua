@@ -1,11 +1,6 @@
 
 -- //////////////////////////////////////////
 -- Typical flow:
--- require 'fullNet'
--- loadFullModel()
--- loadData()
--- optional: loadModelSnapshot() -- createModel.lua
--- trainAndEvaluate() or runEvals()
 -- /////////////////////////////////////////
 
 function loadStandardPackages() 
@@ -60,7 +55,7 @@ function loadParamsAndPackages(iterationsPerEpoch)
   p.numBatches = epochSize / p.batchSize
 
   -- Variable Boolean Parameters (1 or 0)
-  p.trainOnOneBatch   = 0
+  p.trainOnOneBatch = 0
 
   -- Fixed Parameters
   I = 1 -- Table index for image modality - This is its own global variable
@@ -128,6 +123,7 @@ function loadTrainAndValSubsets(kNum)
         pickKFoldSubset(p.kFoldSplitSize, p.kFoldNumSplits, true)
       end
       d.pos_pairs_full, d.neg_pairs_full, d.trainImages, d.trainTexts, d.valImages, d.valTexts = getKFoldSplit(kNum)
+      d.kNumLoaded = kNum
   end
 end
 
@@ -136,11 +132,11 @@ function runEvals()
   m.fullModel:evaluate()
 
   hbc, stdev_image, stdev_text = getHashCodeBitCounts(d.trainset)
-  print(string.format("Stdev I = %.2f", stdev_image))
-  print(string.format("Stdev X = %.2f", stdev_text))
+  statsPrint(string.format("Stdev I = %.2f", stdev_image), g.sf, g.sfv)
+  statsPrint(string.format("Stdev X = %.2f", stdev_text), g.sf, g.sfv)
 
-  print(string.format("Avg 0.5Dist I = %.3f", getSoftMaxAvgDistFromOneHalf(I)))
-  print(string.format("Avg 0.5Dist X = %.3f", getSoftMaxAvgDistFromOneHalf(X)))
+  statsPrint(string.format("Avg 0.5Dist I = %.3f", getSoftMaxAvgDistFromOneHalf(I)), g.sf, g.sfv)
+  statsPrint(string.format("Avg 0.5Dist X = %.3f", getSoftMaxAvgDistFromOneHalf(X)), g.sf, g.sfv)
 
   local imageAccuracy = getClassAccuracyForModality(I)
   local textAccuracy = getClassAccuracyForModality(X)
@@ -181,7 +177,7 @@ function trainAndEvaluate(modality, numEpochs, evalInterval, arg1, arg2)
     local date = os.date("*t", os.time())
     local dateStr = date.month .. "_" .. date.day .. "_" .. date.hour .. "_" .. date.min
     g.sf = io.open(g.snapshotDir .. "/stats_" .. dateStr .. ".txt", "w")
-    g.sfv = io.open(g.snapshotDir .. "/stats_verbose_" .. dateStr .. ".txt", "w")
+    -- g.sfv = io.open(g.snapshotDir .. "/stats_verbose_" .. dateStr .. ".txt", "w")
   end
 
   -- if not paramsAndOptimStatePrepared then
@@ -198,7 +194,7 @@ function trainAndEvaluate(modality, numEpochs, evalInterval, arg1, arg2)
 
   if logResults then
     io.close(g.sf)
-    io.close(g.sfv)
+    -- io.close(g.sfv)
   end
 
 end
@@ -209,15 +205,8 @@ end
 
 function getOptimStateAndShareParameters(modality)
 
-  o.params_full = nil
-  o.gradParams_full = nil
-  o.optimState_full = nil
-  o.params_image = nil
-  o.gradParams_image = nil
-  o.optimState_image = nil
-  o.params_text = nil
-  o.gradParams_text = nil
-  o.optimState_text = nil
+  -- TODO: Get rid of this?
+  o = {}
   collectgarbage()
   
   if modality == 'C' or modality == 'A' then -- TODO: Implement 'A' modality
@@ -442,7 +431,8 @@ function doOneEpochOnModality(modality, evalEpoch, logResults)
 
   statsPrint(string.format("=== %s ===Epoch %d", modality, torch.round(optimState.evalCounter / p.iterationsPerEpoch)), g.sf, g.sfv)
   -- calcAndPrintHammingAccuracy(trainBatch, d.batch_sim_label, g.sfv) -- TODO: This is not very useful because it is only for the last batch in the epoch
-  statsPrint(string.format("Avg Loss this epoch = %.2f", epochLoss / p.numBatches), g.sf, g.sfv)
+  local avgEpochLoss = epochLoss / p.numBatches
+  statsPrint(string.format("Avg Loss this epoch = %.2f", avgEpochLoss), g.sf, g.sfv)
   statsPrint(string.format("Cross Avg Loss this epoch = %.2f", criterionLosses[1] / p.numBatches), g.sf, g.sfv)
   statsPrint(string.format("Bal1 Avg Loss this epoch = %.2f", criterionLosses[2] / p.numBatches), g.sf, g.sfv)
   statsPrint(string.format("Bal2 Avg Loss this epoch = %.2f", criterionLosses[3] / p.numBatches), g.sf, g.sfv)
@@ -460,6 +450,8 @@ function doOneEpochOnModality(modality, evalEpoch, logResults)
       end
       torch.save(snapshotFile, snapshot)
   end
+
+  return avgEpochLoss
 end
 
 function runEverything(iterationsPerEpoch, modelType, lrMultForHashLayer, kNum, modality, simWeight, balanceWeight, quantWeight)
