@@ -3,3 +3,5 @@
 test*
 transfer
 ImKFold*
+Results/autoStats/**/*.txt
+Results/autoStats/**/*.mat

@@ -1,65 +1,155 @@
+-- function getKFoldSplit(kFold_images, kFold_texts, kNum)
+function getKFoldSplit(kNum)
+
+	-- Currently, k fold split is not compatable with siamese models.
+
+	local K = d.kFold_images:size(1)
+	local splitSize = d.kFold_images:size(2)
+
+	local trainImages = torch.LongTensor()
+	local trainTexts = torch.LongTensor()
+	local valImages = torch.LongTensor()
+	local valTexts = torch.LongTensor()
+
+	for k = 1,K do
+		if k == kNum then
+			valImages = d.kFold_images[k]
+			valTexts = d.kFold_texts[k]
+		else
+			trainImages = trainImages:cat(d.kFold_images[k])
+			trainTexts = trainTexts:cat(d.kFold_texts[k])
+		end
+	end
+
+	if not d.sim_ratio_tr then
+		-- In both cases, only examples with > 0.5 similarity will be added to pos_pairs.
+		-- However, only the non-byte version works with variable sim_label_type
+		if p.sim_label_type == 'fixed' then
+			d.sim_ratio_tr = torch.load(g.filePath .. 'simRatioTrByte.t7')
+        else
+			d.sim_ratio_tr = torch.load(g.filePath .. 'simRatioTr.t7')
+		end
+	end
+
+	local Ntrain = trainImages:size(1)
+	local pos_pairs
+	if p.sim_label_type == 'fixed' then
+		pos_pairs = torch.LongTensor(math.pow(Ntrain, 2), 3)
+    else
+		pos_pairs = torch.Tensor(math.pow(Ntrain, 2), 3)
+	end
+	local neg_pairs = torch.LongTensor(math.pow(Ntrain, 2), 2)
+	local p_idx = 1
+	local n_idx = 1
+	for i = 1, Ntrain do
+		for j = 1, Ntrain do
+			local sr = d.sim_ratio_tr[trainImages[i]][trainTexts[j]]
+			if sr == 0 then
+				neg_pairs[n_idx][1] = trainImages[i]
+				neg_pairs[n_idx][2] = trainTexts[j]
+				n_idx = n_idx + 1
+			elseif sr > 0.5 then
+				pos_pairs[p_idx][1] = trainImages[i]
+				pos_pairs[p_idx][2] = trainTexts[j]
+				pos_pairs[p_idx][3] = sr
+				p_idx = p_idx + 1
+			end
+		end
+	end
+
+	pos_pairs:resize(p_idx - 1, 3)
+	neg_pairs:resize(n_idx - 1, 2)
+
+    return pos_pairs, neg_pairs, trainImages, trainTexts, valImages, valTexts
+end
+
+function pickKFoldSubset(splitSize, K, loadPairsFromFile)
+
+	if loadPairsFromFile then
+		local subset_info = torch.load(g.filePath .. 'kFoldSubsetInfo.t7')
+		d.kFold_images = subset_info.kFold_images
+		d.kFold_texts = subset_info.kFold_texts
+	else
+		local totImages = torch.randperm(17251)
+		local totTexts = torch.randperm(17251)
+
+		d.kFold_images = torch.LongTensor(K, splitSize)
+		d.kFold_texts = torch.LongTensor(K, splitSize)
+
+		local k = 0
+		for k = 1, K do
+			local startIdx = (k-1)*splitSize + 1
+			local endIdx = (k)*splitSize
+			d.kFold_images[k] = totImages[ {{ startIdx, endIdx }} ]
+			d.kFold_texts[k] = totTexts[ {{ startIdx, endIdx }} ]
+		end
+    end
+
+	-- return kFold_images, kFold_texts
+end
+
 function pickSubset(loadPairsFromFile)
 
-	-- trainset[1] is all images
-	-- trainset[2] is all texts
+	-- d.trainset[1] is all images
+	-- d.trainset[2] is all texts
 	if not loadPairsFromFile then
 
-		sim_ratio_tr = torch.load(filePath .. 'simRatioTr.t7')
-		sim_ratio_te = torch.load(filePath .. 'simRatioTe.t7')
+		local sim_ratio_tr = torch.load(g.filePath .. 'simRatioTr.t7')
+		-- sim_ratio_te = torch.load(g.filePath .. 'simRatioTe.t7')
 
 		local images = torch.randperm(17251)[{{1,6000}}]:long()
 		local texts = torch.randperm(17251)[{{1,6000}}]:long()
 
-		trainImages = images[ {{ 1, 5000 }} ]
-		trainTexts = texts[ {{ 1, 5000 }} ]
+		local trainImages = images[ {{ 1, 5000 }} ]
+		local trainTexts = texts[ {{ 1, 5000 }} ]
 
-		valImages = images[ {{ 5001, 6000 }} ]
-		valTexts = texts[ {{ 5001, 6000 }} ]
+		local valImages = images[ {{ 5001, 6000 }} ]
+		local valTexts = texts[ {{ 5001, 6000 }} ]
 
-		pos_pairs = torch.Tensor(5000*5000, 3)
-		neg_pairs = torch.LongTensor(5000*5000, 2)
-		p_idx = 1
-		n_idx = 1
+		local pos_pairs_full = torch.Tensor(5000*5000, 3)
+		local neg_pairs_full = torch.LongTensor(5000*5000, 2)
+		local p_idx = 1
+		local n_idx = 1
 		for i = 1,5000 do
 			for j = 1,5000 do
 				local sr = sim_ratio_tr[trainImages[i]][trainTexts[j]]
 				if sr == 0 then
-					neg_pairs[n_idx][1] = trainImages[i]
-					neg_pairs[n_idx][2] = trainTexts[j]
+					neg_pairs_full[n_idx][1] = trainImages[i]
+					neg_pairs_full[n_idx][2] = trainTexts[j]
 					n_idx = n_idx + 1
 				elseif sr > 0.5 then
-					pos_pairs[p_idx][1] = trainImages[i]
-					pos_pairs[p_idx][2] = trainTexts[j]
-					pos_pairs[p_idx][3] = sr
+					pos_pairs_full[p_idx][1] = trainImages[i]
+					pos_pairs_full[p_idx][2] = trainTexts[j]
+					pos_pairs_full[p_idx][3] = sr
 					p_idx = p_idx + 1
 				end
 			end
 		end
 
-		pos_pairs:resize(p_idx - 1, 3)
-		neg_pairs:resize(n_idx - 1, 2)
+		pos_pairs_full:resize(p_idx - 1, 3)
+		neg_pairs_full:resize(n_idx - 1, 2)
 
 		subset_info = {}
-		subset_info.pos_pairs = pos_pairs -- Important- this is loaded later as pos_pairs full
-		subset_info.neg_pairs = neg_pairs -- Important- this is loaded later as neg_pairs full
+		subset_info.pos_pairs = pos_pairs_full -- Important- this is loaded later as pos_pairs full
+		subset_info.neg_pairs = neg_pairs_full -- Important- this is loaded later as neg_pairs full
 		subset_info.trainImages = trainImages
 		subset_info.trainTexts = trainTexts
 		subset_info.valImages = valImages
 		subset_info.valTexts = valTexts
 	else
-		subset_info = torch.load(filePath .. 'subsetInfo.t7')
+		subset_info = torch.load(g.filePath .. 'subsetInfo.t7')
 
-		pos_pairs_full = subset_info.pos_pairs
-		neg_pairs_full = subset_info.neg_pairs
-		trainImages = subset_info.trainImages
-		trainTexts = subset_info.trainTexts
-		valImages = subset_info.valImages
-		valTexts = subset_info.valTexts
+		local pos_pairs_full = subset_info.pos_pairs
+		local neg_pairs_full = subset_info.neg_pairs
+		local trainImages = subset_info.trainImages
+		local trainTexts = subset_info.trainTexts
+		local valImages = subset_info.valImages
+		local valTexts = subset_info.valTexts
 
-		pos_pairs_image = subset_info.pos_pairs_image
-		neg_pairs_image = subset_info.neg_pairs_image
-		pos_pairs_text = subset_info.pos_pairs_text
-		neg_pairs_text = subset_info.neg_pairs_text
+		local pos_pairs_image = subset_info.pos_pairs_image
+		local neg_pairs_image = subset_info.neg_pairs_image
+		local pos_pairs_text = subset_info.pos_pairs_text
+		local neg_pairs_text = subset_info.neg_pairs_text
 	end
 
 	local p_size = pos_pairs_full:size(1)
@@ -67,26 +157,6 @@ function pickSubset(loadPairsFromFile)
 
 	return pos_pairs_full, neg_pairs_full, trainImages, trainTexts, valImages, valTexts, pos_pairs_image, neg_pairs_image, pos_pairs_text, neg_pairs_text
 end
-
--- pos_pairs, neg_pairs, trainImages, trainTexts, valImages, valTexts, p_size, n_size = pickSubset(true)
-
--- -- This method does not allow replacement
--- tot_size = pos_pairs:size(1) + neg_pairs:size(1)
--- pair_perm = torch.randperm(tot_size)
-
--- pos_perm = torch.randperm(p_size)
--- neg_perm = torch.randperm(n_size)
--- epoch_pos_idx = pos_perm[{{1,posExamplesPerEpoch}}]
--- epoch_neg_idx = neg_perm[{{1,negExamplesPerEpoch}}]
-
--- y = torch.Tensor(100):fill(L)
--- y = y:cat(torch.Tensor(500):fill(0))
-
--- This takes forever, although replacement is possible
--- p_range = torch.range(1,p_size)
--- n_range = torch.range(1,n_size)
--- epoch_pos_idx = torch.multinomial(p_range, 100, false)
--- epoch_neg_idx = torch.multinomial(n_range, 500, false)
 
 function pickValSet()
 
@@ -120,9 +190,9 @@ end
 
 function addSimRatio()
 
-	sim_ratio_tr = torch.load(filePath .. 'simRatioTr.t7')
+	local sim_ratio_tr = torch.load(g.filePath .. 'simRatioTr.t7')
 
-	subset_info = torch.load(filePath .. 'subsetInfo.t7')
+	local subset_info = torch.load(g.filePath .. 'subsetInfo.t7')
 
 	local N = subset_info.pos_pairs:size(1)
 
@@ -141,7 +211,7 @@ function addSimRatio()
 		ii = ii + 1
 	end
 
-	torch.save(filePath .. 'subsetInfo.t7', subset_info)
+	torch.save(g.filePath .. 'subsetInfo.t7', subset_info)
 
 end
 

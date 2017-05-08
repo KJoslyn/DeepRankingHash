@@ -16,7 +16,7 @@ function getHashLayerFullyConnected(prevLayerSize, hashLayerSize, lrMultForHashL
         :init('weight', nninit.xavier, {dist = 'normal'})
         :learningRate('weight', lrMultForHashLayer))
 
-    model:add(nn.Reshape(L, k)) -- TODO: Change 120 to batchSize or inputSize
+    model:add(nn.Reshape(p.L, p.k))
     model:add(nn.SplitTable(2))
 
     map = nn.MapTable()
@@ -62,7 +62,7 @@ end
 
 function getImageModel()
 
-    -- local model = loadcaffe.load(filePath .. 'CNN Model/trainnet.prototxt', filePath .. 'CNN Model/snapshot_iter_16000.caffemodel', 'cudnn')
+    -- local model = loadcaffe.load(g.filePath .. 'CNN Model/trainnet.prototxt', g.filePath .. 'CNN Model/snapshot_iter_16000.caffemodel', 'cudnn')
     local model = nn.Sequential()
 
     model:add(cudnn.SpatialConvolution(3,96, 11, 11, 4, 4, 0, 0, 1):init('weight', nninit.xavier, {dist = 'normal', gain = 'relu'}))
@@ -108,7 +108,7 @@ end
 
 function getTextModelForFullNet(L, k, type, lrMultForHashLayer)
 
-    local model = loadcaffe.load(filePath .. 'text model/tag_trainnet.prototxt', filePath .. 'text model/snapshot_iter_200.caffemodel', 'cudnn')
+    local model = loadcaffe.load(g.filePath .. 'text model/tag_trainnet.prototxt', g.filePath .. 'text model/snapshot_iter_200.caffemodel', 'cudnn')
 
     -- Remove first layer that comes from caffemodel
     model.modules[1] = nil
@@ -121,7 +121,7 @@ function getTextModelForFullNet(L, k, type, lrMultForHashLayer)
 end
 
 function getTextModel2()
-    local model = loadcaffe.load(filePath .. 'text model/tag_trainnet.prototxt', filePath .. 'text model/snapshot_iter_200.caffemodel', 'cudnn')
+    local model = loadcaffe.load(g.filePath .. 'text model/tag_trainnet.prototxt', g.filePath .. 'text model/snapshot_iter_200.caffemodel', 'cudnn')
 
     -- Remove first layer that comes from caffemodel
     model.modules[1] = nil
@@ -136,7 +136,7 @@ end
 
 function getImageModel2()
 
-    local model = loadcaffe.load(filePath .. 'CNN Model/trainnet.prototxt', filePath .. 'CNN Model/snapshot_iter_16000.caffemodel', 'cudnn')
+    local model = loadcaffe.load(g.filePath .. 'CNN Model/trainnet.prototxt', g.filePath .. 'CNN Model/snapshot_iter_16000.caffemodel', 'cudnn')
     model:add(nn.Sigmoid())
     return model
 end
@@ -192,16 +192,13 @@ function createCombinedModel(hasher1, hasher2)
 
     -- First stage: Image and text hasher, forward 3 and 4
 
-    -- local con1 = nn.ConcatTable()
-    con1 = nn.ConcatTable()
+    local con1 = nn.ConcatTable()
 
-    -- local con1h1 = nn.Sequential()
-    con1h1 = nn.Sequential()
+    local con1h1 = nn.Sequential()
     con1h1:add(nn.SelectTable(1))
     con1h1:add(hasher1)
 
-    -- local con1h2 = nn.Sequential()
-    con1h2 = nn.Sequential()
+    local con1h2 = nn.Sequential()
     con1h2:add(nn.SelectTable(2))
     con1h2:add(hasher2)
 
@@ -214,22 +211,19 @@ function createCombinedModel(hasher1, hasher2)
 
     -- Second Stage: Dot Product and regularizers
 
-    -- local con2 = nn.ConcatTable()
-    con2 = nn.ConcatTable()
+    local con2 = nn.ConcatTable()
 
-    -- local con2dot = nn.Sequential()
-    con2dot = nn.Sequential()
-    -- local con2dotSel = nn.ConcatTable()
-    con2dotSel = nn.ConcatTable()
+    local con2dot = nn.Sequential()
+    local con2dotSel = nn.ConcatTable()
     con2dotSel:add(nn.SelectTable(1))
     con2dotSel:add(nn.SelectTable(2))
     con2dot:add(con2dotSel)
     con2dot:add(nn.DotProduct())
 
-    bitBalancer1 = getBitBalancer(1, 3)
-    bitBalancer2 = getBitBalancer(2, 4)
-    quantizer1 = getQuantizer(1)
-    quantizer2 = getQuantizer(2)
+    local bitBalancer1 = getBitBalancer(1, 3)
+    local bitBalancer2 = getBitBalancer(2, 4)
+    local quantizer1 = getQuantizer(1)
+    local quantizer2 = getQuantizer(2)
 
     con2:add(con2dot)
     con2:add(bitBalancer1)
@@ -294,25 +288,25 @@ function getCriterion(simWeight, balanceWeight, quantWeight)
 
     -- Cross-modal similarity criterion
 
-    criterion = nn.ParallelCriterion()
+    local criterion = nn.ParallelCriterion()
 
-    critSim = nn.MSECriterion()
+    local critSim = nn.MSECriterion()
     critSim.sizeAverage = false
 
     -- Bit balance criterions
 
-    critBalanceIm = nn.AbsCriterion()
+    local critBalanceIm = nn.AbsCriterion()
     critBalanceIm.sizeAverage = false
 
-    critBalanceTe = nn.AbsCriterion()
+    local critBalanceTe = nn.AbsCriterion()
     critBalanceTe.sizeAverage = false
 
     -- Quantization criterions
 
-    critQuantIm = nn.AbsCriterion()
+    local critQuantIm = nn.AbsCriterion()
     critQuantIm.sizeAverage = false
 
-    critQuantTe = nn.AbsCriterion()
+    local critQuantTe = nn.AbsCriterion()
     critQuantTe.sizeAverage = false
 
     -- Combined criterion
@@ -344,18 +338,18 @@ function loadModelSnapshot(model, snapshot2ndLevelDir, snapshotFileName)
 
   print('****Loading snapshot: ' .. snapshot2ndLevelDir .. '/' .. snapshotFileName)
 
-  snapshotFullPath = snapshotDir .. '/' .. snapshot2ndLevelDir .. '/' .. snapshotFileName
-  snapshot = torch.load(snapshotFullPath)
-  N = snapshot.params:size(1)
+  local snapshotFullPath = g.snapshotDir .. '/' .. snapshot2ndLevelDir .. '/' .. snapshotFileName
+  local snapshot = torch.load(snapshotFullPath)
+  local N = snapshot.params:size(1)
 
   local params, gparams = model:getParameters()
 
-  batchSize = 1e5
+  local batchSize = 1e5
 
   local numBatches = torch.ceil(N / batchSize)
   for b = 0, numBatches - 1 do
-      startIndex = b * batchSize + 1
-      endIndex = math.min((b + 1) * batchSize, N)
+      local startIndex = b * batchSize + 1
+      local endIndex = math.min((b + 1) * batchSize, N)
       params[ {{ startIndex, endIndex }} ]:copy(snapshot.params[ {{ startIndex, endIndex }} ])
   end
 

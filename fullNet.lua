@@ -1,11 +1,6 @@
 
 -- //////////////////////////////////////////
 -- Typical flow:
--- require 'fullNet'
--- loadFullModel()
--- loadData()
--- optional: loadModelSnapshot() -- createModel.lua
--- trainAndEvaluate() or runEvals()
 -- /////////////////////////////////////////
 
 function loadStandardPackages() 
@@ -21,51 +16,59 @@ function loadStandardPackages()
 
 end -- end loadPackages()
 
-function loadParamsAndPackages()
+function loadParamsAndPackages(iterationsPerEpoch)
 
   if not nn then
     loadStandardPackages()
   end
 
+  -- Global variable containers
+  p = {} -- parameters
+  d = {} -- data
+  m = {} -- models
+  g = {} -- other global variables
+  o = {} -- optimStates and model parameters
+
   -- Variable Parameters
   -- numEpochs = 200 -- 416 is max number without truncating an epoch. This is now an input parameter to trainAndEvaluate
-  g_lrMultForHashLayer = 1e4 -- 1e4, 1e5, etc
-  g_modelType = 'gr' -- 'hgr', 'fc', 'hfc'
-  L = 8
-  k = 4
-  sim_label_type = 'fixed' -- 'variable'
-  hashLayerSize = L * k
-  baseLearningRate = 1e-6
-  baseLearningRateDecay = 0 -- 1e-3
-  baseMomentum = 0 -- .9
-  baseWeightDecay = 0
-  posExamplesPerBatch = 25 -- 20
-  negExamplesPerBatch = 75 -- 100
-  iterationsPerEpoch = 100
+  -- p.lrMultForHashLayer = 1e4 -- 1e4, 1e5, etc
+  -- p.modelType = 'gr' -- 'hgr', 'fc', 'hfc'
+  p.L = 8
+  p.k = 4
+  p.sim_label_type = 'fixed' -- 'variable'
+  p.baseLearningRate = 1e-6
+  p.baseLearningRateDecay = 0 -- 1e-3
+  p.baseMomentum = 0 -- .9
+  p.baseWeightDecay = 0
+  p.posExamplesPerBatch = 25 -- 20
+  p.negExamplesPerBatch = 75 -- 100
+  -- p.iterationsPerEpoch = 100
+  p.iterationsPerEpoch = iterationsPerEpoch
+  p.kFoldSplitSize = 500
+  p.kFoldNumSplits = 5
 
   -- These are inferred from above
-  posExamplesPerEpoch = posExamplesPerBatch*iterationsPerEpoch
-  negExamplesPerEpoch = negExamplesPerBatch*iterationsPerEpoch
-  epochSize = posExamplesPerEpoch + negExamplesPerEpoch
-  totNumExamplesPerBatch = posExamplesPerBatch + negExamplesPerBatch
-  numBatches = epochSize / totNumExamplesPerBatch
+  local posExamplesPerEpoch = p.posExamplesPerBatch*p.iterationsPerEpoch
+  local negExamplesPerEpoch = p.negExamplesPerBatch*p.iterationsPerEpoch
+  local epochSize = posExamplesPerEpoch + negExamplesPerEpoch
+  p.batchSize = p.posExamplesPerBatch + p.negExamplesPerBatch
+  p.numBatches = epochSize / p.batchSize
 
   -- Variable Boolean Parameters (1 or 0)
-  trainOnOneBatch   = 0
-  loadModelFromFile = 0
-  saveModelToFile   = 0
+  p.trainOnOneBatch = 0
 
   -- Fixed Parameters
-  I = 1 -- Table index for image modality
-  X = 2 -- Table index for text modality
-  filePath = '/home/kjoslyn/kevin/' -- server
-  snapshotDir = '/home/kjoslyn/kevin/Project/snapshots'
+  I = 1 -- Table index for image modality - This is its own global variable
+  X = 2 -- Table index for text modality - This is its own global variable
+  g.filePath = '/home/kjoslyn/kevin/' -- server
+  g.snapshotDir = '/home/kjoslyn/kevin/Project/snapshots'
 
   reloadAuxfPackage('pickSubset')
   reloadAuxfPackage('evaluate')
   reloadAuxfPackage('dataLoader')
   reloadAuxfPackage('batchLoader')
   reloadAuxfPackage('createModel')
+  reloadAuxfPackage('map')
 end
 
 function reloadAuxfPackage(pname)
@@ -77,86 +80,93 @@ end
 function loadFullModel(modelType, lrMultForHashLayer, loadSiameseModels)
 
   collectgarbage()
-  loadParamsAndPackages()
 
-  if not modelType then
-    modelType = g_modelType
-  end
-  if not lrMultForHashLayer then
-    lrMultForHashLayer = g_lrMultForHashLayer
-  end
-
-  imageClassifier, imageHasher = getImageModelForFullNet(L, k, modelType, lrMultForHashLayer)
-  textClassifier, textHasher = getTextModelForFullNet(L, k, modelType, lrMultForHashLayer)
-  fullModel = createCombinedModel(imageHasher, textHasher)
+  m.imageClassifier, m.imageHasher = getImageModelForFullNet(p.L, p.k, modelType, lrMultForHashLayer)
+  m.textClassifier, m.textHasher = getTextModelForFullNet(p.L, p.k, modelType, lrMultForHashLayer)
+  m.fullModel = createCombinedModel(m.imageHasher, m.textHasher)
 
   if loadSiameseModels then
-    imageSiameseModel = createCombinedModel(imageHasher, imageHasher:clone())
-    textSiameseModel = createCombinedModel(textHasher, textHasher:clone())
+    m.imageSiameseModel = createCombinedModel(m.imageHasher, m.imageHasher:clone())
+    m.textSiameseModel = createCombinedModel(m.textHasher, m.textHasher:clone())
   end
 end
 
 function loadData() 
 
-  if not trainset then
-      trainset = {}
-      testset = {}
+  if not d.trainset then
+      d.trainset = {}
+      d.testset = {}
 
-      -- train_images and test_images each contain data and label fields
-      train_images, test_images = getImageData()
-      trainset[I] = train_images.data
-      testset[I] = test_images.data
+      -- d.train_images and test_images each contain data and label fields
+      local train_images, test_images = getImageData()
+      d.trainset[I] = train_images.data
+      d.testset[I] = test_images.data
 
-      train_labels_image = train_images.label
-      test_labels_image = test_images.label
+      d.train_labels_image = train_images.label
+      d.test_labels_image = test_images.label
 
-      trainset[X], testset[X], train_labels_text, test_labels_text = getTextData()
+      d.trainset[X], d.testset[X], d.train_labels_text, d.test_labels_text = getTextData()
   end
 
-  if not pos_pairs_full then
-      pos_pairs_full, neg_pairs_full, trainImages, trainTexts, valImages, valTexts, pos_pairs_image, neg_pairs_image, pos_pairs_text, neg_pairs_text = pickSubset(true)
-  end
+  -- if not d.pos_pairs_full then
+  --     d.pos_pairs_full, d.neg_pairs_full, d.trainImages, d.trainTexts, d.valImages, d.valTexts, d.pos_pairs_image, d.neg_pairs_image, d.pos_pairs_text, d.neg_pairs_text = pickSubset(true)
+  -- end
 
 end -- end loadData()
 
+function loadTrainAndValSubsets(kNum)
+
+  if not kNum then
+      d.pos_pairs_full, d.neg_pairs_full, d.trainImages, d.trainTexts, d.valImages, d.valTexts, d.pos_pairs_image, d.neg_pairs_image, d.pos_pairs_text, d.neg_pairs_text = pickSubset(true)
+  else
+      if not d.kFold_images then
+        pickKFoldSubset(p.kFoldSplitSize, p.kFoldNumSplits, true)
+      end
+      d.pos_pairs_full, d.neg_pairs_full, d.trainImages, d.trainTexts, d.valImages, d.valTexts = getKFoldSplit(kNum)
+      d.kNumLoaded = kNum
+  end
+end
+
 function runEvals()
 
-  fullModel:evaluate()
+  m.fullModel:evaluate()
 
-  hbc, stdev_image, stdev_text = getHashCodeBitCounts(trainset)
-  print(string.format("Stdev I = %.2f", stdev_image))
-  print(string.format("Stdev X = %.2f", stdev_text))
+  hbc, stdev_image, stdev_text = getHashCodeBitCounts(d.trainset)
+  statsPrint(string.format("Stdev I = %.2f", stdev_image), g.sf, g.sfv)
+  statsPrint(string.format("Stdev X = %.2f", stdev_text), g.sf, g.sfv)
 
-  print(string.format("Avg 0.5Dist I = %.3f", getSoftMaxAvgDistFromOneHalf(I)))
-  print(string.format("Avg 0.5Dist X = %.3f", getSoftMaxAvgDistFromOneHalf(X)))
+  statsPrint(string.format("Avg 0.5Dist I = %.3f", getSoftMaxAvgDistFromOneHalf(I)), g.sf, g.sfv)
+  statsPrint(string.format("Avg 0.5Dist X = %.3f", getSoftMaxAvgDistFromOneHalf(X)), g.sf, g.sfv)
 
-  imageAccuracy = getClassAccuracyForModality(I)
-  textAccuracy = getClassAccuracyForModality(X)
-  statsPrint(string.format('Image Classification Acc: %.2f', imageAccuracy), sf, sfv)
-  statsPrint(string.format('Text Classification Acc: %.2f', textAccuracy), sf, sfv)
+  local imageAccuracy = getClassAccuracyForModality(I)
+  local textAccuracy = getClassAccuracyForModality(X)
+  statsPrint(string.format('Image Classification Acc: %.2f', imageAccuracy), g.sf, g.sfv)
+  statsPrint(string.format('Text Classification Acc: %.2f', textAccuracy), g.sf, g.sfv)
 
-  batchTextClassAcc = getClassAccuracy(trainBatch.data[X], trainBatch.label[X])
-  batchImageClassAcc = getClassAccuracy(trainBatch.data[I], trainBatch.label[I])-- TODO: This is not very useful because it is only for the last batch in the epoch
-  statsPrint(string.format("Batch Text Classification Acc = %.2f", batchTextClassAcc), sfv)
-  statsPrint(string.format("Batch Image Classification Acc = %.2f", batchImageClassAcc), sfv)
+  local batchTextClassAcc = getClassAccuracy(trainBatch.data[X], trainBatch.label[X])
+  local batchImageClassAcc = getClassAccuracy(trainBatch.data[I], trainBatch.label[I])-- TODO: This is not very useful because it is only for the last batch in the epoch
+  statsPrint(string.format("Batch Text Classification Acc = %.2f", batchTextClassAcc), g.sfv)
+  statsPrint(string.format("Batch Image Classification Acc = %.2f", batchImageClassAcc), g.sfv)
 
-  IXt = calcMAP(I, X, 'train')
-  XIt = calcMAP(X, I, 'train')
-  IXv = calcMAP(I, X, 'val')
-  XIv = calcMAP(X, I, 'val')
-  IIt = calcMAP(I, I, 'train')
-  XXt = calcMAP(X, X, 'train')
-  IIv = calcMAP(I, I, 'val')
-  XXv = calcMAP(X, X, 'val')
+  local IXt = calcMAP(I, X, 'train')
+  local XIt = calcMAP(X, I, 'train')
+  local IXv = calcMAP(I, X, 'val')
+  local XIv = calcMAP(X, I, 'val')
+  local IIt = calcMAP(I, I, 'train')
+  local XXt = calcMAP(X, X, 'train')
+  local IIv = calcMAP(I, I, 'val')
+  local XXv = calcMAP(X, X, 'val')
 
-  statsPrint(string.format("X -> I train MAP = %.2f", XIt), sf, sfv)
-  statsPrint(string.format("I -> X train MAP = %.2f", IXt), sf, sfv)
-  statsPrint(string.format("X -> X train MAP = %.2f", XXt), sf, sfv)
-  statsPrint(string.format("I -> I train MAP = %.2f", IIt), sf, sfv)
-  statsPrint(string.format("X -> I val MAP = %.2f", XIv), sf, sfv)
-  statsPrint(string.format("I -> X val MAP = %.2f", IXv), sf, sfv)
-  statsPrint(string.format("X -> X val MAP = %.2f", XXv), sf, sfv)
-  statsPrint(string.format("I -> I val MAP = %.2f", IIv), sf, sfv)
+  statsPrint(string.format("X -> I train MAP = %.2f", XIt), g.sf, g.sfv)
+  statsPrint(string.format("I -> X train MAP = %.2f", IXt), g.sf, g.sfv)
+  statsPrint(string.format("X -> X train MAP = %.2f", XXt), g.sf, g.sfv)
+  statsPrint(string.format("I -> I train MAP = %.2f", IIt), g.sf, g.sfv)
+  statsPrint(string.format("X -> I val MAP = %.2f", XIv), g.sf, g.sfv)
+  statsPrint(string.format("I -> X val MAP = %.2f", IXv), g.sf, g.sfv)
+  statsPrint(string.format("X -> X val MAP = %.2f", XXv), g.sf, g.sfv)
+  statsPrint(string.format("I -> I val MAP = %.2f", IIv), g.sf, g.sfv)
+
+  return IXt, XIt, IXv, XIv
 
 end
 
@@ -168,8 +178,8 @@ function trainAndEvaluate(modality, numEpochs, evalInterval, arg1, arg2)
   if logResults then
     local date = os.date("*t", os.time())
     local dateStr = date.month .. "_" .. date.day .. "_" .. date.hour .. "_" .. date.min
-    sf = io.open(snapshotDir .. "/stats_" .. dateStr .. ".txt", "w")
-    sfv = io.open(snapshotDir .. "/stats_verbose_" .. dateStr .. ".txt", "w")
+    g.sf = io.open(g.snapshotDir .. "/stats_" .. dateStr .. ".txt", "w")
+    -- g.sfv = io.open(g.snapshotDir .. "/stats_verbose_" .. dateStr .. ".txt", "w")
   end
 
   -- if not paramsAndOptimStatePrepared then
@@ -185,74 +195,67 @@ function trainAndEvaluate(modality, numEpochs, evalInterval, arg1, arg2)
   end
 
   if logResults then
-    io.close(sf)
-    io.close(sfv)
+    io.close(g.sf)
+    -- io.close(g.sfv)
   end
 
 end
 
 function doGetCriterion(simWeight, balanceWeight, quantWeight)
-  criterion = getCriterion(simWeight, balanceWeight, quantWeight)
+  m.criterion = getCriterion(simWeight, balanceWeight, quantWeight)
 end
 
 function getOptimStateAndShareParameters(modality)
 
+  -- TODO: Get rid of this?
+  o = {}
   collectgarbage()
-  params_full = nil
-  gradParams_full = nil
-  optimState_full = nil
-  params_image = nil
-  gradParams_image = nil
-  optimState_image = nil
-  params_text = nil
-  gradParams_text = nil
-  optimState_text = nil
   
   if modality == 'C' or modality == 'A' then -- TODO: Implement 'A' modality
 
     print('***WARNING- Getting full model parameters, siamese weight sharing will be destroyed')
-    params_full, gradParams_full = fullModel:getParameters() -- This destroys the weight sharing for the siamese models!
+    o.params_full, o.gradParams_full = m.fullModel:getParameters() -- This destroys the weight sharing for the siamese models!
 
-    local learningRates_full, weightDecays_full = fullModel:getOptimConfig(baseLearningRate, baseWeightDecay)
+    local learningRates_full, weightDecays_full = m.fullModel:getOptimConfig(p.baseLearningRate, p.baseWeightDecay)
 
-    optimState_full = {
-          learningRate = baseLearningRate,
-          learningRateDecay = baseLearningRateDecay,
+    o.optimState_full = {
+          learningRate = p.baseLearningRate,
+          learningRateDecay = p.baseLearningRateDecay,
           learningRates = learningRates_full,
           weightDecays = weightDecays_full,
-          momentum = baseMomentum
+          momentum = p.baseMomentum
     }
 
   end
   if modality == 'I' or modality == 'A' then
 
-    params_image, gradParams_image = imageSiameseModel:getParameters()
-    imageSiameseModel:get(1):get(2):share(imageSiameseModel:get(1):get(1), 'bias', 'weight', 'gradWeight', 'gradParams')
+    o.params_image, o.gradParams_image = m.imageSiameseModel:getParameters()
+    m.imageSiameseModel:get(1):get(2):share(m.imageSiameseModel:get(1):get(1), 'bias', 'weight', 'gradWeight', 'gradParams')
 
-    local learningRates_image, weightDecays_image = imageSiameseModel:getOptimConfig(baseLearningRate, baseWeightDecay)
+    local learningRates_image, weightDecays_image = m.imageSiameseModel:getOptimConfig(p.baseLearningRate, p.baseWeightDecay)
 
-    optimState_image = {
-          learningRate = baseLearningRate,
-          learningRateDecay = baseLearningRateDecay,
+    o.optimState_image = {
+          learningRate = p.baseLearningRate,
+          learningRateDecay = p.baseLearningRateDecay,
           learningRates = learningRates_image,
           weightDecays = weightDecays_image,
-          momentum = baseMomentum
+          momentum = p.baseMomentum
     }
 
   end
   if modality == 'X' or modality == 'A' then
 
-    params_text, gradParams_text = textSiameseModel:getParameters()
-    textSiameseModel:get(1):get(2):share(textSiameseModel:get(1):get(1), 'bias', 'weight', 'gradWeight', 'gradParams')
+    o.params_text, o.gradParams_text = m.textSiameseModel:getParameters()
+    m.textSiameseModel:get(1):get(2):share(m.textSiameseModel:get(1):get(1), 'bias', 'weight', 'gradWeight', 'gradParams')
 
-    local learningRates_text, weightDecays_text = textSiameseModel:getOptimConfig(baseLearningRate, baseWeightDecay)
+    local learningRates_text, weightDecays_text = m.textSiameseModel:getOptimConfig(p.baseLearningRate, p.baseWeightDecay)
 
-    optimState_text = {
-          learningRate = baseLearningRate,
-          learningRateDecay = baseLearningRateDecay,
+    o.optimState_text = {
+          learningRate = p.baseLearningRate,
+          learningRateDecay = p.baseLearningRateDecay,
           learningRates = learningRates_text,
           weightDecays = weightDecays_text,
-          momentum = baseMomentum
+          momentum = p.baseMomentum
     }
 
   end
@@ -261,36 +264,38 @@ end
 function changeLearningRateForClassifier(lrMult)
 
   if not classifierWeightIndices then
-    classifierWeightIndices = optimState_full.learningRates:eq(1)
-    hashLayerIndices = optimState_full.learningRates:neq(1)
+    classifierWeightIndices = o.optimState_full.learningRates:eq(1)
+    hashLayerIndices = o.optimState_full.learningRates:neq(1)
   end
-  optimState_full.learningRates[classifierWeightIndices] = lrMult
+  o.optimState_full.learningRates[classifierWeightIndices] = lrMult
 
 end
 
 function getModalitySpecifics(modality)
 
+  local model, params, gradParams, optimState, pos_pairs, neg_pairs
+
   if modality == 'X' then
-    model = textSiameseModel
-    params = params_text
-    gradParams = gradParams_text
-    optimState = optimState_text
-    pos_pairs = pos_pairs_text
-    neg_pairs = neg_pairs_text
+    model = m.textSiameseModel
+    params = o.params_text
+    gradParams = o.gradParams_text
+    optimState = o.optimState_text
+    pos_pairs = d.pos_pairs_text
+    neg_pairs = d.neg_pairs_text
   elseif modality == 'I' then
-    model = imageSiameseModel
-    params = params_image
-    gradParams = gradParams_image
-    optimState = optimState_image
-    pos_pairs = pos_pairs_image
-    neg_pairs = neg_pairs_image
+    model = m.imageSiameseModel
+    params = o.params_image
+    gradParams = o.gradParams_image
+    optimState = o.optimState_image
+    pos_pairs = d.pos_pairs_image
+    neg_pairs = d.neg_pairs_image
   elseif modality == 'C' then
-    model = fullModel
-    params = params_full
-    gradParams = gradParams_full
-    optimState = optimState_full
-    pos_pairs = pos_pairs_full
-    neg_pairs = neg_pairs_full
+    model = m.fullModel
+    params = o.params_full
+    gradParams = o.gradParams_full
+    optimState = o.optimState_full
+    pos_pairs = d.pos_pairs_full
+    neg_pairs = d.neg_pairs_full
   else
     print('Error: unrecognized modality in getModalitySpecifics')
   end
@@ -300,19 +305,28 @@ end
 
 function getInputAndTarget(modality, trainBatch)
 
+  if p.sim_label_type == 'fixed' and not g.batch_sim_label_for_loss_fixed then
+    -- The label tensor will be the same for each batch
+    local batch_sim_label = torch.Tensor(p.posExamplesPerBatch):fill(1)
+    batch_sim_label = batch_sim_label:cat(torch.Tensor(p.negExamplesPerBatch):fill(0))
+    batch_sim_label = torch.CudaByteTensor(p.batchSize):copy(batch_sim_label)
+    g.batch_sim_label_for_loss_fixed = torch.CudaTensor(p.batchSize):copy(batch_sim_label) * p.L -- for MSECriterion
+    -- g.batch_sim_label_for_loss_fixed = torch.CudaTensor(p.batchSize):copy(batch_sim_label) -- for BCECriterion only
+  end
+
   local batchSize = trainBatch.data[1]:size(1)
-  local trainSize = trainset[1]:size(1)
+  local trainSize = d.trainset[1]:size(1)
   local trainEstimatorConst = trainSize / batchSize
   -- beta_im_pre = torch.sum(imPred, 1):view(-1):mul(trainEstimatorConst)
   -- beta_te_pre = torch.sum(tePred, 1):view(-1):mul(trainEstimatorConst)
-  -- local alpha = trainSize / k
-  local pred1, pred2
+  -- local alpha = trainSize / p.k
+  local pred1, pred2, imPred, tePred
   if modality == 'I' or modality == 'C' then
-    imPred = imageHasher:forward(trainBatch.data[I])
+    imPred = m.imageHasher:forward(trainBatch.data[I])
     pred1 = imPred
   end
   if modality == 'X' or modality == 'C' then
-    tePred = textHasher:forward(trainBatch.data[X])
+    tePred = m.textHasher:forward(trainBatch.data[X])
     pred2 = tePred
   end
   if modality == 'X' then
@@ -321,38 +335,38 @@ function getInputAndTarget(modality, trainBatch)
     pred2 = imPred
   end
 
-  beta1 = torch.sum(pred1, 1):view(-1)
-  beta2 = torch.sum(pred2, 1):view(-1)
-  local alpha = batchSize / k
-  gamma1 = beta1 - 2*alpha
-  gamma2 = beta2 - 2*alpha
-  gamma1 = torch.expand(gamma1:resize(1,L*k), batchSize, L*k)
-  gamma2 = torch.expand(gamma2:resize(1,L*k), batchSize, L*k)
-  local bt = - L * (batchSize / k)
-  balance_target = torch.CudaTensor(batchSize):fill(bt)
+  local beta1 = torch.sum(pred1, 1):view(-1)
+  local beta2 = torch.sum(pred2, 1):view(-1)
+  local alpha = batchSize / p.k
+  local gamma1 = beta1 - 2*alpha
+  local gamma2 = beta2 - 2*alpha
+  local gamma1 = torch.expand(gamma1:resize(1,p.L*p.k), batchSize, p.L*p.k)
+  local gamma2 = torch.expand(gamma2:resize(1,p.L*p.k), batchSize, p.L*p.k)
+  local bt = - p.L * (batchSize / p.k)
+  local balance_target = torch.CudaTensor(batchSize):fill(bt)
 
   -- beta1 = torch.sum(pred1, 1):view(-1) * (trainSize / batchSize)
   -- beta2 = torch.sum(pred2, 1):view(-1) * (trainSize / batchSize)
-  -- local alpha = trainSize / k
+  -- local alpha = trainSize / p.k
   -- gamma1 = beta1 - 2*alpha
   -- gamma2 = beta2 - 2*alpha
-  -- gamma1 = torch.expand(gamma1:resize(1,L*k), batchSize, L*k)
-  -- gamma2 = torch.expand(gamma2:resize(1,L*k), batchSize, L*k)
-  -- local bt = - L * (trainSize / k)
+  -- gamma1 = torch.expand(gamma1:resize(1,p.L*p.k), batchSize, p.L*p.k)
+  -- gamma2 = torch.expand(gamma2:resize(1,p.L*p.k), batchSize, p.L*p.k)
+  -- local bt = - p.L * (trainSize / p.k)
   -- balance_target = torch.CudaTensor(batchSize):fill(bt)
 
-  quant_target = torch.CudaTensor(batchSize):fill(0.5*L*k)
+  local quant_target = torch.CudaTensor(batchSize):fill(0.5*p.L*p.k)
 
-  input = {}
+  local input = {}
   input[1] = trainBatch.data[1]
   input[2] = trainBatch.data[2]
   input[3] = gamma1
   input[4] = gamma2
 
-  target = {}
-  if sim_label_type == 'fixed' then
-    target[1] = batch_sim_label_for_loss_fixed
-  elseif sim_label_type == 'variable' then
+  local target = {}
+  if p.sim_label_type == 'fixed' then
+    target[1] = g.batch_sim_label_for_loss_fixed
+  elseif p.sim_label_type == 'variable' then
     target[1] = trainBatch.batch_sim_label_for_loss
   end
   target[2] = balance_target
@@ -365,34 +379,23 @@ end
 
 function doOneEpochOnModality(modality, evalEpoch, logResults)
 
-  -- The label tensor will be the same for each batch
-  batch_sim_label = torch.Tensor(posExamplesPerBatch):fill(1)
-  batch_sim_label = batch_sim_label:cat(torch.Tensor(negExamplesPerBatch):fill(0))
-  batch_sim_label = torch.CudaByteTensor(totNumExamplesPerBatch):copy(batch_sim_label)
-  batch_sim_label_for_loss_fixed = torch.CudaTensor(totNumExamplesPerBatch):copy(batch_sim_label) * L -- for MSECriterion
-  -- batch_sim_label_for_loss_fixed = torch.CudaTensor(totNumExamplesPerBatch):copy(batch_sim_label) -- for BCECriterion only
-
   local model, params, gradParams, optimState, pos_pairs, neg_pairs = getModalitySpecifics(modality)
 
   trainBatch = {}
 
-  if trainOnOneBatch == 1 then
+  if p.trainOnOneBatch == 1 then
     print("**************WARNING- Training on one batch only")
     trainBatch = getBatch(pos_pairs, neg_pairs, modality)
   end
 
   model:training()
 
-  epochLoss = 0
-  crossModalEpochLoss = 0
-  balance1EpochLoss = 0
-  balance2EpochLoss = 0
-  quant1EpochLoss = 0
-  quant2EpochLoss = 0
+  local epochLoss = 0
+  local criterionLosses = torch.Tensor(#m.criterion.criterions):fill(0)
 
-  for batchNum = 0, numBatches - 1 do
+  for batchNum = 0, p.numBatches - 1 do
 
-      if trainOnOneBatch == 0 then
+      if p.trainOnOneBatch == 0 then
           trainBatch = getBatch(pos_pairs, neg_pairs, modality)
       end
 
@@ -409,8 +412,8 @@ function doOneEpochOnModality(modality, evalEpoch, logResults)
           gradParams:zero()
 
           output = model:forward(input)
-          local loss = criterion:forward(output, target)
-          local dloss_doutput = criterion:backward(output, target)
+          local loss = m.criterion:forward(output, target)
+          local dloss_doutput = m.criterion:backward(output, target)
           model:backward(input, dloss_doutput)
 
           gradParams:div(inputSize)
@@ -418,11 +421,9 @@ function doOneEpochOnModality(modality, evalEpoch, logResults)
 
           -- Stats
           epochLoss = epochLoss + loss
-          crossModalEpochLoss = crossModalEpochLoss + critSim:forward(output[1], target[1])/inputSize
-          balance1EpochLoss = balance1EpochLoss + critBalanceIm:forward(output[2], target[2])/inputSize
-          balance2EpochLoss = balance2EpochLoss + critBalanceTe:forward(output[3], target[3])/inputSize
-          quant1EpochLoss = quant1EpochLoss + critQuantIm:forward(output[4], target[4])/inputSize
-          quant2EpochLoss = quant2EpochLoss + critQuantTe:forward(output[5], target[5])/inputSize
+          for i = 1, criterionLosses:size(1) do
+            criterionLosses[i] = criterionLosses[i] + m.criterion.criterions[i]:forward(output[i], target[i])/inputSize
+          end
 
           return loss, gradParams
       end
@@ -430,17 +431,19 @@ function doOneEpochOnModality(modality, evalEpoch, logResults)
 
   end
 
-  statsPrint("=== " .. modality .. " ===Epoch " .. evalEpoch, sf, sfv)
-  -- calcAndPrintHammingAccuracy(trainBatch, batch_sim_label, sfv) -- TODO: This is not very useful because it is only for the last batch in the epoch
-  statsPrint(string.format("Avg Loss this epoch = %.2f", epochLoss / numBatches), sf, sfv)
-  statsPrint(string.format("Cross Avg Loss this epoch = %.2f", crossModalEpochLoss / numBatches), sf, sfv)
-  statsPrint(string.format("Bal1 Avg Loss this epoch = %.2f", balance1EpochLoss / numBatches), sf, sfv)
-  statsPrint(string.format("Bal2 Avg Loss this epoch = %.2f", balance2EpochLoss / numBatches), sf, sfv)
-  statsPrint(string.format("Quant1 Avg Loss this epoch = %.2f", quant1EpochLoss / numBatches), sf, sfv)
-  statsPrint(string.format("Quant2 Avg Loss this epoch = %.2f", quant2EpochLoss / numBatches), sf, sfv)
+  statsPrint(string.format("=== %s ===Epoch %d", modality, torch.round(optimState.evalCounter / p.iterationsPerEpoch)), g.sf, g.sfv)
+  -- calcAndPrintHammingAccuracy(trainBatch, d.batch_sim_label, g.sfv) -- TODO: This is not very useful because it is only for the last batch in the epoch
+  local avgEpochLoss = epochLoss / p.numBatches
+  local crossModalEpochLoss = criterionLosses[1] / p.numBatches
+  statsPrint(string.format("Avg Loss this epoch = %.2f", avgEpochLoss), g.sf, g.sfv)
+  statsPrint(string.format("Cross Avg Loss this epoch = %.2f", crossModalEpochLoss), g.sf, g.sfv)
+  statsPrint(string.format("Bal1 Avg Loss this epoch = %.2f", criterionLosses[2] / p.numBatches), g.sf, g.sfv)
+  statsPrint(string.format("Bal2 Avg Loss this epoch = %.2f", criterionLosses[3] / p.numBatches), g.sf, g.sfv)
+  statsPrint(string.format("Quant1 Avg Loss this epoch = %.2f", criterionLosses[4] / p.numBatches), g.sf, g.sfv)
+  statsPrint(string.format("Quant2 Avg Loss this epoch = %.2f", criterionLosses[5] / p.numBatches), g.sf, g.sfv)
 
   if logResults and evalEpoch % 50 == 0 then
-      local snapshotFile = snapshotDir .. "/snapshot_epoch_" .. epoch .. ".t7" 
+      local snapshotFile = g.snapshotDir .. "/snapshot_epoch_" .. epoch .. ".t7" 
       local snapshot = {}
       snapshot.params = params
       -- snapshot.params = torch.CudaTensor(params:size()):copy(params)
@@ -450,12 +453,16 @@ function doOneEpochOnModality(modality, evalEpoch, logResults)
       end
       torch.save(snapshotFile, snapshot)
   end
+
+  return avgEpochLoss, crossModalEpochLoss
 end
 
-function runEverything(modelType, lrMultForHashLayer, modality, simWeight, balanceWeight, quantWeight)
+function runEverything(iterationsPerEpoch, modelType, lrMultForHashLayer, kNum, modality, simWeight, balanceWeight, quantWeight)
 
+  loadParamsAndPackages(iterationsPerEpoch)
   loadFullModel(modelType, lrMultForHashLayer)
   loadData()
+  loadTrainAndValSubsets(kNum)
   getOptimStateAndShareParameters(modality)
   doGetCriterion(simWeight, balanceWeight, quantWeight)
 
