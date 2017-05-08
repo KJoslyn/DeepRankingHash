@@ -166,6 +166,8 @@ function runEvals()
   statsPrint(string.format("X -> X val MAP = %.2f", XXv), g.sf, g.sfv)
   statsPrint(string.format("I -> I val MAP = %.2f", IIv), g.sf, g.sfv)
 
+  return IXt, XIt, IXv, XIv
+
 end
 
 function trainAndEvaluate(modality, numEpochs, evalInterval, arg1, arg2)
@@ -432,8 +434,9 @@ function doOneEpochOnModality(modality, evalEpoch, logResults)
   statsPrint(string.format("=== %s ===Epoch %d", modality, torch.round(optimState.evalCounter / p.iterationsPerEpoch)), g.sf, g.sfv)
   -- calcAndPrintHammingAccuracy(trainBatch, d.batch_sim_label, g.sfv) -- TODO: This is not very useful because it is only for the last batch in the epoch
   local avgEpochLoss = epochLoss / p.numBatches
+  local crossModalEpochLoss = criterionLosses[1] / p.numBatches
   statsPrint(string.format("Avg Loss this epoch = %.2f", avgEpochLoss), g.sf, g.sfv)
-  statsPrint(string.format("Cross Avg Loss this epoch = %.2f", criterionLosses[1] / p.numBatches), g.sf, g.sfv)
+  statsPrint(string.format("Cross Avg Loss this epoch = %.2f", crossModalEpochLoss), g.sf, g.sfv)
   statsPrint(string.format("Bal1 Avg Loss this epoch = %.2f", criterionLosses[2] / p.numBatches), g.sf, g.sfv)
   statsPrint(string.format("Bal2 Avg Loss this epoch = %.2f", criterionLosses[3] / p.numBatches), g.sf, g.sfv)
   statsPrint(string.format("Quant1 Avg Loss this epoch = %.2f", criterionLosses[4] / p.numBatches), g.sf, g.sfv)
@@ -451,7 +454,7 @@ function doOneEpochOnModality(modality, evalEpoch, logResults)
       torch.save(snapshotFile, snapshot)
   end
 
-  return avgEpochLoss
+  return avgEpochLoss, crossModalEpochLoss
 end
 
 function runEverything(iterationsPerEpoch, modelType, lrMultForHashLayer, kNum, modality, simWeight, balanceWeight, quantWeight)

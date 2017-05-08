@@ -194,8 +194,8 @@ function saveDistAndSimToMatFile(D,S)
     if not matio then
         matio = require 'matio'
     end
-    date = os.date("*t", os.time())
-    dateStr = date.month .. "_" .. date.day .. "_" .. date.hour .. "_" .. date.min
+    local date = os.date("*t", os.time())
+    local dateStr = date.month .. "_" .. date.day .. "_" .. date.hour .. "_" .. date.min
     matio.save(g.snapshotDir .. '/DS_data_' .. dateStr .. '.mat', {D=D_new,S=S_new})
 end
 
