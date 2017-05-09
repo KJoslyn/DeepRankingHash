@@ -38,7 +38,9 @@ function recursiveRunAllParamsets(pfs_part, pfs_full, paramCount, numParams)
 
     if paramCount == numParams then
         -- printParams(pfs_full)
-        runWithParams(pfs_full)
+        if validateParams() then
+            runWithParams(pfs_full)
+        end
     else
         local thisParamset = pfs_part[1]
         local paramName = thisParamset[1]
@@ -54,6 +56,15 @@ function recursiveRunAllParamsets(pfs_part, pfs_full, paramCount, numParams)
             recursiveRunAllParamsets( { unpack(pfs_part, 2, #pfs_part) }, pfs_full, paramCount + 1, numParams)
             setParamValue(paramName, oldValue)
         end
+    end
+end
+
+function validateParams()
+
+    if p.quantRegWeight > 0 and p.balanceRegWeight == 0 then
+        return false
+    else
+        return true
     end
 end
 
