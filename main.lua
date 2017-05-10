@@ -1,13 +1,13 @@
 require 'fullNet'
 
-function runAllParamsets(paramFactorialSet, numEpochs, evalInterval, consecutiveStop)
+function runAllParamsets(dataset, paramFactorialSet, numEpochs, evalInterval, consecutiveStop)
 
     -- This is the main function to call
 
     -- TODO: This is set to a constants
     local iterationsPerEpoch = 25
 
-    loadParamsAndPackages(iterationsPerEpoch)
+    loadParamsAndPackages(dataset, iterationsPerEpoch)
 
     g.statsDir = '/home/kjoslyn/kevin/Project/autoStats'
     g.meta = io.open(g.statsDir .. "/metaStats.txt", 'a')

@@ -1,4 +1,14 @@
-function getImageData(small)
+function getImageDataNuswide()
+
+    -- local file = '/home/kjoslyn/datasets/nuswide/trainQueryValSplitNormalized.mat'
+    -- local split = matio.load(file, 'split')
+    -- torch.save('trainQueryValSplitNormalized.t7', split)
+
+    local split = torch.load('/home/kjoslyn/datasets/nuswide/trainQueryValSplitNormalized.t7')
+    return split.trainSet, split.querySet, split.valSet -- QuerySet will act as test set
+end
+
+function getImageDataMirflickr(small)
 
     print('Getting image data')
 
@@ -16,6 +26,7 @@ function getImageData(small)
     local train_images = torch.load(g.filePath .. 'CNN Model/' .. trainImageDataFile)
     local test_images = torch.load(g.filePath .. 'CNN Model/' .. testImageDataFile)
 
+    -- Mirflickr data is unnormalized
     local mean = {} -- store the mean, to normalize the test set in the future
     local stdv  = {} -- store the standard-deviation for the future
     for i=1,3 do -- over each image channel

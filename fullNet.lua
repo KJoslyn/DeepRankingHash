@@ -16,7 +16,7 @@ function loadStandardPackages()
 
 end -- end loadPackages()
 
-function loadParamsAndPackages(iterationsPerEpoch)
+function loadParamsAndPackages(dataset, iterationsPerEpoch)
 
   if not nn then
     loadStandardPackages()
@@ -57,11 +57,24 @@ function loadParamsAndPackages(iterationsPerEpoch)
   -- Variable Boolean Parameters (1 or 0)
   p.trainOnOneBatch = 0
 
+  -- Dataset
+  local snapshotDatasetDir
+  if dataset == 'mir' then
+      p.numClasses = 24
+      snapshotDatasetDir = '/mirflickr'
+  elseif dataset == 'nus' then
+      p.numClasses = 21
+      snapshotDatasetDir = '/nuswide'
+  else
+      print("Error: Unrecognized dataset!! Should be mir or nus")
+  end
+  p.datasetType = dataset
+
   -- Fixed Parameters
   I = 1 -- Table index for image modality - This is its own global variable
   X = 2 -- Table index for text modality - This is its own global variable
   g.filePath = '/home/kjoslyn/kevin/' -- server
-  g.snapshotDir = '/home/kjoslyn/kevin/Project/snapshots'
+  g.snapshotDir = '/home/kjoslyn/kevin/Project/snapshots' .. snapshotDatasetDir
 
   reloadAuxfPackage('pickSubset')
   reloadAuxfPackage('evaluate')
@@ -98,7 +111,7 @@ function loadData()
       d.testset = {}
 
       -- d.train_images and test_images each contain data and label fields
-      local train_images, test_images = getImageData()
+      local train_images, test_images = getImageDataMirflickr()
       d.trainset[I] = train_images.data
       d.testset[I] = test_images.data
 
@@ -457,9 +470,9 @@ function doOneEpochOnModality(modality, evalEpoch, logResults)
   return avgEpochLoss, crossModalEpochLoss
 end
 
-function runEverything(iterationsPerEpoch, modelType, lrMultForHashLayer, kNum, modality, simWeight, balanceWeight, quantWeight)
+function runEverything(dataset, iterationsPerEpoch, modelType, lrMultForHashLayer, kNum, modality, simWeight, balanceWeight, quantWeight)
 
-  loadParamsAndPackages(iterationsPerEpoch)
+  loadParamsAndPackages(dataset, iterationsPerEpoch)
   loadFullModel(modelType, lrMultForHashLayer)
   loadData()
   loadTrainAndValSubsets(kNum)

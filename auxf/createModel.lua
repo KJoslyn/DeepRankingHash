@@ -87,7 +87,7 @@ function getImageModel()
     model:add(nn.Linear(4096, 4096):init('weight', nninit.xavier, {dist = 'normal', gain = 'relu'}))
     model:add(cudnn.ReLU(true))
     model:add(nn.Dropout(0.500000))
-    model:add(nn.Linear(4096, 24):init('weight', nninit.xavier, {dist = 'normal', gain = 'sigmoid'}))
+    model:add(nn.Linear(4096, p.numClasses):init('weight', nninit.xavier, {dist = 'normal', gain = 'sigmoid'}))
 
     model:add(nn.Sigmoid())
 

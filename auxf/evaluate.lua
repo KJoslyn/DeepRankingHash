@@ -15,7 +15,7 @@ end
 
 function getClassAccuracy(data, labels)
 
-    roundedOutput = computeInBatches(calcRoundedClassifierOutput, torch.CudaTensor(data:size(1), 24), data)
+    roundedOutput = computeInBatches(calcRoundedClassifierOutput, torch.CudaTensor(data:size(1), p.numClasses), data)
 
     numInstances = data:size(1)
     dotProd = torch.CudaTensor(numInstances)
@@ -180,7 +180,7 @@ function getDistanceAndSimilarityForMAP(queryCodes, databaseCodes, queryLabels, 
         queryCodeRep = torch.expand(queryCodes[q]:reshape(p.L,1), p.L, numDB):transpose(1,2)
         D[q] = torch.ne(queryCodeRep, databaseCodes):sum(2)
 
-        queryLabelRep = torch.expand(queryLabels[q]:reshape(24,1), 24, numDB):transpose(1,2)
+        queryLabelRep = torch.expand(queryLabels[q]:reshape(p.numClasses,1), p.numClasses, numDB):transpose(1,2)
         S[q] = torch.cmul(queryLabelRep, databaseLabels):max(2)
     end
 
