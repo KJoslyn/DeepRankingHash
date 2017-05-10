@@ -25,6 +25,7 @@ function runAllParamsets(paramFactorialSet, numEpochs, evalInterval, consecutive
     p.numKFoldSplits = getNumKFoldSplits(paramFactorialSet)
 
     g.paramSettingsLegend = {}
+    -- TODO: Convert to concatenating tensors (due to validating params)
     g.trainResultsMatrix = torch.Tensor(numParamCombs, numEpochs / evalInterval):fill(0)
     g.valResultsMatrix = torch.Tensor(numParamCombs, numEpochs / evalInterval):fill(0)
     g.resultsParamIdx = 0

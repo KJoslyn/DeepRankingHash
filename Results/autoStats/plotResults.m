@@ -1,6 +1,10 @@
-function [ output_args ] = plotResults( evalInterval, numEpochs, trainOrValResMat )
+function [ output_args ] = plotResults( evalInterval, numEpochs, trainOrValResMat, title, legendCell )
 
-    plot(evalInterval:evalInterval:numEpochs, trainOrValResMat.')
+    load('colorOrder10.mat');
+    set(gca, 'ColorOrder', colorOrder, 'NextPlot', 'replacechildren');
+    plot(evalInterval:evalInterval:numEpochs, trainOrValResMat.');
+    legend(legendCell)
+    title(title)
 
 end
 
