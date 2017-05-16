@@ -73,9 +73,7 @@ end
 
 function computeInBatches(computeFunction, output, data) 
 
-    if data:size(2) == 1075 then -- Text modality
-        return computeFunction(data)
-    elseif data:size(2) == 3 then -- Image modality
+    if data:size(2) == 3 then -- Image modality
         local N = data:size(1)
         local batchSize = 128
         local numBatches = torch.ceil(N / batchSize)
@@ -86,8 +84,8 @@ function computeInBatches(computeFunction, output, data)
             output[{{ startIndex, endIndex}}] = computeFunction(batch)
         end
         return output    
-    else
-        print("Error: unrecognized modality")
+    else -- Text modality
+        return computeFunction(data)
     end
 end
 
@@ -341,3 +339,38 @@ function calcAndPrintHammingAccuracy(trainBatch, similarity_target, statsFile)
         statsPrint(string.format("Accuracy%d = %.2f", i, numCorrect*100 / s), statsFile)
     end
 end
+
+function plotClassAccAndLoss(epoch, plotLoss)
+    local elapsedEpochs = epoch - (g.plotStartEpoch - 1) -- startEpoch should be one greater than a multiple of g.plotNumEpochs
+    if elapsedEpochs / g.plotNumEpochs > 1 then
+        local x = torch.linspace(g.plotStartEpoch + g.plotNumEpochs - 1, epoch, elapsedEpochs / g.plotNumEpochs)
+
+        local y = g.avgDataAcc
+        local yh = g.maxDataAcc
+        local yl = g.minDataAcc
+        local yy = torch.cat(x,yh,2)
+        local yy = torch.cat(yy,yl,2)
+
+        local y2 = g.avgDataLoss
+        local yh2 = g.maxDataLoss
+        local yl2 = g.minDataLoss
+        local yy2 = torch.cat(x, yh2, 2)
+        local yy2 = torch.cat(yy2, yl2, 2)
+
+        if not g.plotFilename then
+            local date = os.date("*t", os.time())
+            local dateStr = date.month .. "_" .. date.day .. "_" .. date.hour .. "_" .. date.min
+            g.plotFilename = g.snapshotDir .. '/' .. dateStr .. '_' .. 'plot.pdf' 
+        end
+        gnuplot.pdffigure(g.plotFilename)
+        if plotLoss then
+            gnuplot.plot({yy2,'with filledcurves fill transparent solid 0.5'},{x,yl2,'with lines ls 1'},{x,yh2,'with lines ls 1'},{x,y2,'with lines ls 1'},
+                         {yy,'with filledcurves fill transparent solid 0.5'},{x,yl,'with lines ls 1'},{x,yh,'with lines ls 1'},{x,y,'with lines ls 1'})
+        else
+            gnuplot.plot({yy,'with filledcurves fill transparent solid 0.5'},{x,yl,'with lines ls 1'},{x,yh,'with lines ls 1'},{x,y,'with lines ls 1'})
+        end
+        gnuplot.plotflush()
+    end
+end
+
+gnuplot.plot({yy2,'with filledcurves fill transparent solid 0.5'},{x,yl2,'with lines ls 1'},{x,yh2,'with lines ls 1'},{x,y2,'with lines ls 1'},{yy1,'with filledcurves fill transparent solid 0.5'},{x,yl1,'with lines ls 1'},{x,yh1,'with lines ls 1'},{x,y1,'with lines ls 1'})

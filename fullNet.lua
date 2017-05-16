@@ -118,7 +118,7 @@ function loadData()
       d.train_labels_image = train_images.label
       d.test_labels_image = test_images.label
 
-      d.trainset[X], d.testset[X], d.train_labels_text, d.test_labels_text = getTextData()
+      d.trainset[X], d.testset[X], d.train_labels_text, d.test_labels_text = getTextDataMirflickr()
   end
 
   -- if not d.pos_pairs_full then

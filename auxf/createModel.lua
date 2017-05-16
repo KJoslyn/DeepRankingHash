@@ -106,6 +106,23 @@ function getImageModelForFullNet(L, k, type, lrMultForHashLayer)
     return createClassifierAndHasher(model, 4096, L, k, type, lrMultForHashLayer)
 end
 
+function getTextModelForNuswide(L, k, type, lrMultForHashLayer)
+
+    local model = nn.Sequential()
+    -- model.add(nn.View(-1):setNumInputDims(3))
+    model:add(nn.Linear(1000, 1000):init('weight', nninit.xavier, {dist = 'normal', gain = 'relu'}))
+    model:add(cudnn.ReLU(true))
+    model:add(nn.Dropout(0.500000))
+    model:add(nn.Linear(1000, 2048):init('weight', nninit.xavier, {dist = 'normal', gain = 'relu'}))
+    model:add(cudnn.ReLU(true))
+    model:add(nn.Dropout(0.500000))
+    model:add(nn.Linear(2048, p.numClasses):init('weight', nninit.xavier, {dist = 'normal', gain = 'sigmoid'}))
+
+    model:add(nn.Sigmoid())
+
+    return model
+end
+
 function getTextModelForFullNet(L, k, type, lrMultForHashLayer)
 
     local model = loadcaffe.load(g.filePath .. 'text model/tag_trainnet.prototxt', g.filePath .. 'text model/snapshot_iter_200.caffemodel', 'cudnn')

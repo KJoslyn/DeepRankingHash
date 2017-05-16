@@ -4,8 +4,38 @@ function getImageDataNuswide()
     -- local split = matio.load(file, 'split')
     -- torch.save('trainQueryValSplitNormalized.t7', split)
 
-    local split = torch.load('/home/kjoslyn/datasets/nuswide/trainQueryValSplitNormalized.t7')
+    local split = torch.load('/home/kjoslyn/datasets/nuswide/trainQueryValSplitNormalizedLarge.t7')
     return split.trainSet, split.querySet, split.valSet -- QuerySet will act as test set
+end
+
+function normalizeNuswideImageData()
+    -- This function is only to be used once to normalize the nuswide data
+
+    -- split = matio.load('blah.mat') -- This is a mat file with uint8 for the unnormalized data
+
+    split.trainSet.data = split.trainSet.data:transpose(3,4)
+    split.trainSet.data = split.trainSet.data:transpose(2,3)
+    split.valSet.data = split.valSet.data:transpose(3,4)
+    split.valSet.data = split.valSet.data:transpose(2,3)
+    split.querySet.data = split.querySet.data:transpose(3,4)
+    split.querySet.data = split.querySet.data:transpose(2,3)
+
+    split.trainSet.data = split.trainSet.data:float()
+    split.valSet.data = split.valSet.data:float()
+    split.querySet.data = split.querySet.data:float()
+
+    -- Split is the unnormalized data
+    avgStd = matio.load('/home/kjoslyn/datasets/nuswide/avgStd.mat')
+    avgStd = avgStd.avgStd
+    for i = 1,3 do
+        split.trainSet.data[{ {}, {i}, {}, {} }]:add(-avgStd.means[1][i])
+        split.querySet.data[{ {}, {i}, {}, {} }]:add(-avgStd.means[1][i])
+        split.valSet.data[{ {}, {i}, {}, {} }]:add(-avgStd.means[1][i])
+
+        split.trainSet.data[{ {}, {i}, {}, {} }]:div(avgStd.stdev[1][i])
+        split.querySet.data[{ {}, {i}, {}, {} }]:div(avgStd.stdev[1][i])
+        split.valSet.data[{ {}, {i}, {}, {} }]:div(avgStd.stdev[1][i])
+    end
 end
 
 function getImageDataMirflickr(small)
@@ -44,7 +74,7 @@ function getImageDataMirflickr(small)
     return train_images, test_images
 end
 
-function getTextData()
+function getTextDataMirflickr()
 
     local train_texts = torch.load(g.filePath .. 'mirTagTr.t7')
     local test_texts = torch.load(g.filePath .. 'mirTagTe.t7')
@@ -55,6 +85,14 @@ function getTextData()
     return train_texts.T_tr, test_texts.T_te, train_labels_text.L_tr, test_labels_text.L_te
 end
 
-function getData() 
+function getTextDataNuswide() 
+
+    if not matio then
+        matio = require 'matio'
+    end
+
+    local split = matio.load('/home/kjoslyn/datasets/nuswide/trainQueryValSplitTextOnlyLarge.mat')
+    split = split.split;
+    return split.trainSet, split.querySet, split.valSet -- QuerySet will act as test set
 end
 

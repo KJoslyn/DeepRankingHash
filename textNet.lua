@@ -1,11 +1,13 @@
 
 -- //////////////////////////////////////////
 -- Typical flow:
--- require 'imageNet'
+-- require 'textNet'
 -- loadPackagesAndModel(dataset) -- 'mir' or 'nus'
--- loadData() -- uses dataLoader.lua. 1 input parameter- true for 1000 instanes (small)
+-- loadData(useKFold, small) -- uses dataLoader.lua. 1 input parameter- true for 1000 instanes (small)
 -- optional: loadModelSnapshot -- from createModel.lua
--- trainAndEvaluate()
+-- trainAndEvaluate(kFoldNum, batchSize, learningRate, numEpochs, startEpoch, printTestsetAcc)
+
+-- For nuswide, batchsize of 100 and lr of .1 works well. Epoch 500-750 good, overfitting after that
 -- /////////////////////////////////////////
 
 function loadPackagesAndModel(dataset)
@@ -17,13 +19,9 @@ function loadPackagesAndModel(dataset)
     require 'auxf.evaluate'
     require 'auxf.dataLoader'
     require 'auxf.createModel'
-
-    GPU = true
-    if (GPU) then
-        require 'cutorch'
-        require 'cunn'
-        require 'cudnn'
-    end
+    require 'cutorch'
+    require 'cunn'
+    require 'cudnn'
 
     p = {} -- parameters
     d = {} -- data
@@ -48,8 +46,8 @@ function loadPackagesAndModel(dataset)
     g.filePath = '/home/kjoslyn/kevin/' -- server
     g.snapshotDir = '/home/kjoslyn/kevin/Project/snapshots' .. snapshotDatasetDir
 
-    -- //////////// Load image model
-    m.imageClassifier = getImageModel()
+    -- //////////// Load text model
+    m.textClassifier = getTextModelForNuswide()
 
     g.accIdx = 0
     g.plotNumEpochs = 5;
@@ -96,9 +94,9 @@ end
 function loadData(useKFold, small)
 
     if p.datasetType == 'mir' then
-        d.trainset, d.testset = getImageDataMirflickr(small)
+        d.trainset, d.testset = getTextDataMirflickr(small)
     elseif p.datasetType == 'nus' then
-        d.trainset, d.testset, d.valset = getImageDataNuswide(small)
+        d.trainset, d.testset, d.valset = getTextDataNuswide(small)
     end
 
     totTrain = d.trainset.data:size(1)
@@ -145,9 +143,11 @@ function getKFoldSplit(trainset, K)
     return KFoldTrainSet, KFoldValSet
 end
 
-function trainAndEvaluate(kFoldNum, batchSize, learningRate, momentum, numEpochs, startEpoch, printTrainsetAcc)
+function trainAndEvaluate(kFoldNum, batchSize, learningRate, numEpochs, startEpoch, printTestsetAcc)
     -- kFoldNum is the number of the validation set that will be used for training in this run
     -- use -1 for no validation set
+
+    -- batchSize is 128 for image modality, -1 for text (no batch for text)
 
     if not g.plotStartEpoch then
         g.plotStartEpoch = startEpoch
@@ -156,26 +156,27 @@ function trainAndEvaluate(kFoldNum, batchSize, learningRate, momentum, numEpochs
     -- criterion = nn.MultiLabelSoftMarginCriterion()
     -- criterion = nn.MSECriterion()
     criterion = nn.BCECriterion()
+    -- criterion.sizeAverage = false -- TODO: This is not in image network!
 
-    if (GPU) then
-        criterion = criterion:cuda()
-        -- d.testset.data = d.testset.data:cuda()
-        -- d.testset.label = d.testset.label:cuda()
-        m.imageClassifier:cuda()
-    end
+    criterion = criterion:cuda()
+    -- d.testset.data = d.testset.data:cuda()
+    -- d.testset.label = d.testset.label:cuda()
+    m.textClassifier:cuda()
 
-    params, gradParams = m.imageClassifier:getParameters()
+    params, gradParams = m.textClassifier:getParameters()
 
     local optimState = {
-        learningRate = learningRate, -- .01 works for mirflickr
+        learningRate = learningRate -- .01 works for mirflickr
         -- learningRateDecay = 1e-7
         -- learningRate = 1e-3,
         -- learningRateDecay = 1e-4,
         -- weightDecay = 0.01
-        momentum = momentum -- .9?
+        -- momentum = 0.9
     }
 
-    -- batchSize = 128
+    if batchSize == -1 then
+        batchSize = Ntrain
+    end
 
     if kFoldNum == -1 then
         Nval = 0
@@ -186,12 +187,15 @@ function trainAndEvaluate(kFoldNum, batchSize, learningRate, momentum, numEpochs
 
     numBatches = math.ceil(Ntrain / batchSize)
 
-    m.imageClassifier:training()
+    m.textClassifier:training()
 
     if not startEpoch then
         startEpoch = 1
     end
     for epoch = startEpoch, numEpochs do
+
+        print('gc = ' .. collectgarbage('count'))
+        collectgarbage()
 
         -- shuffle at each epoch
         perm = torch.randperm(Ntrain):long()
@@ -200,8 +204,7 @@ function trainAndEvaluate(kFoldNum, batchSize, learningRate, momentum, numEpochs
 
         for batchNum = 0, numBatches - 1 do
 
-            local trainBatch = getBatch(kFoldNum, batchNum, batchSize, perm)
-            collectgarbage()
+            trainBatch = getBatch(kFoldNum, batchNum, batchSize, perm)
 
             function feval(x)
                 -- get new parameters
@@ -211,7 +214,7 @@ function trainAndEvaluate(kFoldNum, batchSize, learningRate, momentum, numEpochs
 
                 gradParams:zero()
 
-                local outputs = m.imageClassifier:forward(trainBatch.data)
+                local outputs = m.textClassifier:forward(trainBatch.data)
                 local loss = criterion:forward(outputs, trainBatch.label)
 
                 totalLoss = totalLoss + loss
@@ -220,7 +223,12 @@ function trainAndEvaluate(kFoldNum, batchSize, learningRate, momentum, numEpochs
                 -- local numOnes = roundedOutput:sum()
 
                 local dloss_doutputs = criterion:backward(outputs, trainBatch.label)
-                m.imageClassifier:backward(trainBatch.data, dloss_doutputs)
+                m.textClassifier:backward(trainBatch.data, dloss_doutputs)
+
+                -- TODO: This is not in image network!!!
+                -- local inputSize = trainBatch.data:size(1)
+                -- gradParams:div(inputSize)
+                -- loss = loss/inputSize
 
                 return loss, gradParams
             end
@@ -229,8 +237,7 @@ function trainAndEvaluate(kFoldNum, batchSize, learningRate, momentum, numEpochs
             -- collectgarbage()
         end
 
-        collectgarbage()
-        m.imageClassifier:evaluate()
+        m.textClassifier:evaluate()
         avgLoss = totalLoss / numBatches
         print("Epoch " .. epoch .. ": avg loss = " .. avgLoss)
         avgNumIncorrect = totNumIncorrect / Ntrain
@@ -241,12 +248,11 @@ function trainAndEvaluate(kFoldNum, batchSize, learningRate, momentum, numEpochs
         elseif d.valset then
             classAcc = getClassAccuracy(d.valset.data, d.valset.label:cuda())
             print(string.format("Epoch %d: Val set class accuracy = %.2f\n", epoch, classAcc))
+        elseif printTestsetAcc then
+            classAcc = getClassAccuracy(d.testset.data, d.testset.label:cuda())
+            print(string.format("Epoch %d: Test set class accuracy = %.2f\n", epoch, classAcc))
         end
-        if printTrainsetAcc then
-            classAcc = getClassAccuracy(d.trainset.data, d.trainset.label:cuda())
-            print(string.format("Epoch %d: Train set class accuracy = %.2f\n", epoch, classAcc))
-        end
-        m.imageClassifier:training()
+        m.textClassifier:training()
 
         g.accIdx = g.accIdx + 1
         g.pastNAcc[g.accIdx] = classAcc
@@ -262,14 +268,9 @@ function trainAndEvaluate(kFoldNum, batchSize, learningRate, momentum, numEpochs
             g.accIdx = 0
         end
 
-        if epoch == 300 or epoch == 500 or epoch == 750 or epoch == 900 or epoch == 1000 then
-            local paramsToSave, gp = m.imageClassifier:getParameters()
-            local snapshotFile
-            if g.tempFlag then
-                snapshotFile = g.snapshotDir .. "/imageNet/first_snapshot_epoch_" .. epoch .. ".t7" 
-            else
-                snapshotFile = g.snapshotDir .. "/imageNet/snapshot_epoch_" .. epoch .. ".t7" 
-            end
+        if epoch == 500 or epoch == 750 or epoch == 900 or epoch == 1000 then
+            local paramsToSave, gp = m.textClassifier:getParameters()
+            local snapshotFile = g.snapshotDir .. "/textNet/snapshot_epoch_" .. epoch .. ".t7" 
             local snapshot = {}
             snapshot.params = paramsToSave
             snapshot.gparams = gp
