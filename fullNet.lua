@@ -110,15 +110,21 @@ function loadData()
       d.trainset = {}
       d.testset = {}
 
-      -- d.train_images and test_images each contain data and label fields
-      local train_images, test_images = getImageDataMirflickr()
-      d.trainset[I] = train_images.data
-      d.testset[I] = test_images.data
+      local trainset, queryset, valset
+      if p.datasetType == 'mir' then
+        trainset, queryset, valset = getImageAndTextDataMirflickr()
+      elseif p.datasetType == 'nus' then
+        trainset, queryset, valset = getImageAndTextDataNuswide()
+      end
 
-      d.train_labels_image = train_images.label
-      d.test_labels_image = test_images.label
-
-      d.trainset[X], d.testset[X], d.train_labels_text, d.test_labels_text = getTextDataMirflickr()
+      d.trainset[I] = trainset.data
+      d.testset[I] = queryset.data
+      d.train_labels_image = trainset.label
+      d.test_labels_image = queryset.label
+      d.trainset[X] = trainset.tags
+      d.testset[X] = queryset.tags
+      d.train_labels_text = trainset.label
+      d.test_labels_text = queryset.label
   end
 
   -- if not d.pos_pairs_full then

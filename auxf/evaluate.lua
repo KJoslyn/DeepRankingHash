@@ -372,5 +372,3 @@ function plotClassAccAndLoss(epoch, plotLoss)
         gnuplot.plotflush()
     end
 end
-
-gnuplot.plot({yy2,'with filledcurves fill transparent solid 0.5'},{x,yl2,'with lines ls 1'},{x,yh2,'with lines ls 1'},{x,y2,'with lines ls 1'},{yy1,'with filledcurves fill transparent solid 0.5'},{x,yl1,'with lines ls 1'},{x,yh1,'with lines ls 1'},{x,y1,'with lines ls 1'})

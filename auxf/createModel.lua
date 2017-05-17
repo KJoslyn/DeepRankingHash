@@ -106,14 +106,14 @@ function getImageModelForFullNet(L, k, type, lrMultForHashLayer)
     return createClassifierAndHasher(model, 4096, L, k, type, lrMultForHashLayer)
 end
 
-function getTextModelForNuswide(L, k, type, lrMultForHashLayer)
+function getUntrainedTextModel()
 
     local model = nn.Sequential()
     -- model.add(nn.View(-1):setNumInputDims(3))
-    model:add(nn.Linear(1000, 1000):init('weight', nninit.xavier, {dist = 'normal', gain = 'relu'}))
+    model:add(nn.Linear(p.tagDim, p.tagDim):init('weight', nninit.xavier, {dist = 'normal', gain = 'relu'}))
     model:add(cudnn.ReLU(true))
     model:add(nn.Dropout(0.500000))
-    model:add(nn.Linear(1000, 2048):init('weight', nninit.xavier, {dist = 'normal', gain = 'relu'}))
+    model:add(nn.Linear(p.tagDim, 2048):init('weight', nninit.xavier, {dist = 'normal', gain = 'relu'}))
     model:add(cudnn.ReLU(true))
     model:add(nn.Dropout(0.500000))
     model:add(nn.Linear(2048, p.numClasses):init('weight', nninit.xavier, {dist = 'normal', gain = 'sigmoid'}))
@@ -123,7 +123,7 @@ function getTextModelForNuswide(L, k, type, lrMultForHashLayer)
     return model
 end
 
-function getTextModelForFullNet(L, k, type, lrMultForHashLayer)
+function getMirflickrCaffeTrainedTextModel()
 
     local model = loadcaffe.load(g.filePath .. 'text model/tag_trainnet.prototxt', g.filePath .. 'text model/snapshot_iter_200.caffemodel', 'cudnn')
 
@@ -133,31 +133,28 @@ function getTextModelForFullNet(L, k, type, lrMultForHashLayer)
         model.modules[i] = model.modules[i+1]
     end
     model.modules[#model.modules] = nil
+
+    model:add(nn.Sigmoid())
+
+    return model
+end
+
+function getTextModelForFullNet(L, k, type, lrMultForHashLayer)
+
+    local model
+    if p.datasetType == 'mir' then
+        model = getMirflickrCaffeTrainedTextModel()
+    elseif p.datasetType == 'nus' then
+        model = getUntrainedTextModel()
+        local snapshot2ndLevelDir = 'textNet/Large'
+        local snapshotFile = 'snapshot_epoch_500.t7'
+        loadModelSnapshot(model, snapshot2ndLevelDir, snapshotFile)
+    end
+
+    model.modules[#model.modules] = nil -- This is messy, but need to remove sigmoid layer for now. Will add it back later.
 
     return createClassifierAndHasher(model, 2048, L, k, type, lrMultForHashLayer)
 end
-
-function getTextModel2()
-    local model = loadcaffe.load(g.filePath .. 'text model/tag_trainnet.prototxt', g.filePath .. 'text model/snapshot_iter_200.caffemodel', 'cudnn')
-
-    -- Remove first layer that comes from caffemodel
-    model.modules[1] = nil
-    for i = 1,#model.modules-1 do
-        model.modules[i] = model.modules[i+1]
-    end
-    model.modules[#model.modules] = nil
-
-    model:add(nn.Sigmoid())
-    return model
-end
-
-function getImageModel2()
-
-    local model = loadcaffe.load(g.filePath .. 'CNN Model/trainnet.prototxt', g.filePath .. 'CNN Model/snapshot_iter_16000.caffemodel', 'cudnn')
-    model:add(nn.Sigmoid())
-    return model
-end
-
 
 function createClassifierAndHasher(model, prevLayerSize, L, k, type, lrMultForHashLayer)
 
@@ -344,7 +341,6 @@ function getCriterion(simWeight, balanceWeight, quantWeight)
 end
 
 function loadModelSnapshot(model, snapshot2ndLevelDir, snapshotFileName)
-
 
   -- If these aren't specified, use hardcoded values
   if not snapshot2ndLevelDir and snapshotFileName then

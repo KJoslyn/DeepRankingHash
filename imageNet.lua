@@ -96,10 +96,14 @@ end
 function loadData(useKFold, small)
 
     if p.datasetType == 'mir' then
-        d.trainset, d.testset = getImageDataMirflickr(small)
+        d.trainset, d.testset, d.valset = getImageAndTextDataMirflickr()
     elseif p.datasetType == 'nus' then
-        d.trainset, d.testset, d.valset = getImageDataNuswide(small)
+        d.trainset, d.testset, d.valset = getImageAndTextDataNuswide()
     end
+    -- Don't need tags for image network
+    d.trainset.tags = nil
+    d.testset.tags = nil
+    d.valset.tags = nil
 
     totTrain = d.trainset.data:size(1)
     Ntest = d.testset.data:size(1)
@@ -265,11 +269,9 @@ function trainAndEvaluate(kFoldNum, batchSize, learningRate, momentum, numEpochs
         if epoch == 300 or epoch == 500 or epoch == 750 or epoch == 900 or epoch == 1000 then
             local paramsToSave, gp = m.imageClassifier:getParameters()
             local snapshotFile
-            if g.tempFlag then
-                snapshotFile = g.snapshotDir .. "/imageNet/first_snapshot_epoch_" .. epoch .. ".t7" 
-            else
-                snapshotFile = g.snapshotDir .. "/imageNet/snapshot_epoch_" .. epoch .. ".t7" 
-            end
+            local date = os.date("*t", os.time())
+            local dateStr = date.month .. "_" .. date.day .. "_" .. date.hour .. "_" .. date.min
+            local snapshotFile = g.snapshotDir .. "/imageNet/" .. dateStr .. "_snapshot_epoch_" .. epoch .. ".t7" 
             local snapshot = {}
             snapshot.params = paramsToSave
             snapshot.gparams = gp

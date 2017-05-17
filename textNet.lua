@@ -34,9 +34,11 @@ function loadPackagesAndModel(dataset)
     local snapshotDatasetDir
     if dataset == 'mir' then
         p.numClasses = 24
+        p.tagDim = 1075
         snapshotDatasetDir = '/mirflickr'
     elseif dataset == 'nus' then
         p.numClasses = 21
+        p.tagDim = 1000
         snapshotDatasetDir = '/nuswide'
     else
         print("Error: Unrecognized dataset!! Should be mir or nus")
@@ -47,7 +49,8 @@ function loadPackagesAndModel(dataset)
     g.snapshotDir = '/home/kjoslyn/kevin/Project/snapshots' .. snapshotDatasetDir
 
     -- //////////// Load text model
-    m.textClassifier = getTextModelForNuswide()
+    
+    m.textClassifier = getUntrainedTextModel()
 
     g.accIdx = 0
     g.plotNumEpochs = 5;
@@ -94,7 +97,7 @@ end
 function loadData(useKFold, small)
 
     if p.datasetType == 'mir' then
-        d.trainset, d.testset = getTextDataMirflickr(small)
+        d.trainset, d.testset, d.valset = getTextDataMirflickr(small)
     elseif p.datasetType == 'nus' then
         d.trainset, d.testset, d.valset = getTextDataNuswide(small)
     end
@@ -270,7 +273,9 @@ function trainAndEvaluate(kFoldNum, batchSize, learningRate, numEpochs, startEpo
 
         if epoch == 500 or epoch == 750 or epoch == 900 or epoch == 1000 then
             local paramsToSave, gp = m.textClassifier:getParameters()
-            local snapshotFile = g.snapshotDir .. "/textNet/snapshot_epoch_" .. epoch .. ".t7" 
+            local date = os.date("*t", os.time())
+            local dateStr = date.month .. "_" .. date.day .. "_" .. date.hour .. "_" .. date.min
+            local snapshotFile = g.snapshotDir .. "/textNet/" .. dateStr .. "_snapshot_epoch_" .. epoch .. ".t7" 
             local snapshot = {}
             snapshot.params = paramsToSave
             snapshot.gparams = gp
