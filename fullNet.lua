@@ -62,9 +62,11 @@ function loadParamsAndPackages(dataset, iterationsPerEpoch)
   if dataset == 'mir' then
       p.numClasses = 24
       snapshotDatasetDir = '/mirflickr'
+      g.datasetPath = '/home/kjoslyn/datasets/mirflickr/'
   elseif dataset == 'nus' then
       p.numClasses = 21
       snapshotDatasetDir = '/nuswide'
+      g.datasetPath = '/home/kjoslyn/datasets/nuswide/'
   else
       print("Error: Unrecognized dataset!! Should be mir or nus")
   end
@@ -112,7 +114,7 @@ function loadData()
 
       local trainset, queryset, valset
       if p.datasetType == 'mir' then
-        trainset, queryset, valset = getImageAndTextDataMirflickr()
+        trainset, pretrainset, queryset, valset = getImageAndTextDataMirflickr()
       elseif p.datasetType == 'nus' then
         trainset, queryset, valset = getImageAndTextDataNuswide()
       end

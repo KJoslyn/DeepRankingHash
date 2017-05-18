@@ -96,7 +96,7 @@ end
 function loadData(useKFold, small)
 
     if p.datasetType == 'mir' then
-        d.trainset, d.testset, d.valset = getImageAndTextDataMirflickr()
+        d.trainset, d.testset, d.valset = getImageNetDataMirflickr()
     elseif p.datasetType == 'nus' then
         d.trainset, d.testset, d.valset = getImageAndTextDataNuswide()
     end
