@@ -140,8 +140,7 @@ function dataset:__init(...)
    ----------------------------------------------------------------------
    -- Options for the GNU find command
    local extensionList = {'jpg', 'png','JPG','PNG','JPEG', 'ppm', 'PPM', 'bmp', 'BMP'}
---    local extensionList = {'jpg'}
-   local findOptions = '-iname "*.' .. extensionList[1] .. '"'
+   local findOptions = ' -iname "*.' .. extensionList[1] .. '"'
    for i=2,#extensionList do
       findOptions = findOptions .. ' -o -iname "*.' .. extensionList[i] .. '"'
    end
@@ -155,54 +154,38 @@ function dataset:__init(...)
    print('running "find" on each class directory, and concatenate all' 
          .. ' those filenames into a single file containing all image paths for a given class')
    -- so, generates one file per class
---    local classFindFiles = {}
---    for i=1,#self.classes do
---       classFindFiles[i] = os.tmpname()
---    end
+   local classFindFiles = {}
+   for i=1,#self.classes do
+      classFindFiles[i] = os.tmpname()
+   end
    local combinedFindList = os.tmpname();
    
    local tmpfile = os.tmpname()
    local tmphandle = assert(io.open(tmpfile, 'w'))
    -- iterate over classes
-   print("--Classes")
-   print(self.classes)
-   print("--Classpaths")
-   print(classPaths)
---    print("--classFindFiles")
---    print(classFindFiles)
-   print("--find")
-   print(find)
-   print("--findOptions")
-   print(findOptions)
-   local findPaths = ''
    for i, class in ipairs(self.classes) do
       -- iterate over classPaths
       for j,path in ipairs(classPaths[i]) do
-
-         findPaths = findPaths .. '"' .. path .. '" '
-         local command = find .. ' "' .. path .. '" ' .. findOptions .. ' | sort -V'
-         .. ' >>"' .. classFindFiles[i] .. '" \n'
+         local command = find .. ' "' .. path .. '" ' .. findOptions 
+            .. ' >>"' .. classFindFiles[i] .. '" \n'
+         tmphandle:write(command)
       end
    end
-   local command = find .. ' ' .. findPaths .. findOptions .. ' | sort -V'
-   .. ' >>"' .. combinedFindList .. '" \n'
-   tmphandle:write(command)
-   print(command)
    io.close(tmphandle)
    os.execute('bash ' .. tmpfile)
    os.execute('rm -f ' .. tmpfile)
    
---    print('now combine all the files to a single large file')
---    local tmpfile = os.tmpname()
---    local tmphandle = assert(io.open(tmpfile, 'w'))
---    -- concat all finds to a single large file in the order of self.classes
---    for i=1,#self.classes do
---       local command = 'cat "' .. classFindFiles[i] .. '" >>' .. combinedFindList .. ' \n'
---       tmphandle:write(command)
---    end
---    io.close(tmphandle)
---    os.execute('bash ' .. tmpfile)
---    os.execute('rm -f ' .. tmpfile)
+   print('now combine all the files to a single large file')
+   local tmpfile = os.tmpname()
+   local tmphandle = assert(io.open(tmpfile, 'w'))
+   -- concat all finds to a single large file in the order of self.classes
+   for i=1,#self.classes do
+      local command = 'cat "' .. classFindFiles[i] .. '" >>' .. combinedFindList .. ' \n'
+      tmphandle:write(command)
+   end
+   io.close(tmphandle)
+   os.execute('bash ' .. tmpfile)
+   os.execute('rm -f ' .. tmpfile)
    
    --==========================================================================
    print('load the large concatenated list of sample paths to self.imagePath')
@@ -369,21 +352,29 @@ function dataset:getByClass(class)
 end
 
 -- converts a table of samples (and corresponding labels) to a clean tensor
-local function tableToOutput(self, dataTable, labelTable)
-   local data, labels
-   local quantity = #labelTable
-   if quantity == 1 then
+local function tableToOutput(self, dataTable, scalarTable)
+   local data, scalarLabels, labels
+   local quantity = #scalarTable
+   local samplesPerDraw
+   if dataTable[1]:dim() == 3 then samplesPerDraw = 1
+   else samplesPerDraw = dataTable[1]:size(1) end
+   if quantity == 1 and samplesPerDraw == 1 then
       data = dataTable[1]
-      labels = labelTable[1]
+      scalarLabels = scalarTable[1]
+      labels = torch.LongTensor(#(self.classes)):fill(-1)
+      labels[scalarLabels] = 1
    else
-      data = torch.FloatTensor(quantity, self.sampleSize[1], self.sampleSize[2], self.sampleSize[3])
-      labels = torch.ByteTensor(quantity, 24)
+      data = torch.Tensor(quantity * samplesPerDraw, 
+                          self.sampleSize[1], self.sampleSize[2], self.sampleSize[3])
+      scalarLabels = torch.LongTensor(quantity * samplesPerDraw)
+      labels = torch.LongTensor(quantity * samplesPerDraw, #(self.classes)):fill(-1)
       for i=1,#dataTable do
-         data[{ {i}, {}, {}, {} }]:copy(dataTable[i])
-	     labels[{ {i}, {} }]:copy(labelTable[i])
+         data[{{i, i+samplesPerDraw-1}}]:copy(dataTable[i])
+         scalarLabels[{{i, i+samplesPerDraw-1}}]:fill(scalarTable[i])
+	     labels[{{i, i+samplesPerDraw-1},{scalarTable[i]}}]:fill(1)
       end
    end   
-   return data, labels
+   return data, scalarLabels, labels
 end
 
 -- sampler, samples from the training set.
@@ -422,31 +413,20 @@ function dataset:get(i1, i2)
    end
    assert(quantity > 0)
    -- now that indices has been initialized, get the samples
-
-   local data = torch.FloatTensor(quantity, self.sampleSize[1], self.sampleSize[2], self.sampleSize[3])
-   local labels = torch.ByteTensor(quantity, 24)
+   local dataTable = {}
+   local scalarTable = {}
    for i=1,quantity do
       -- load the sample
       local imgpath = ffi.string(torch.data(self.imagePath[indices[i]]))
-      data[i] = self:sampleHookTest(imgpath)
+      out = self:sampleHookTest(imgpath)
+      table.insert(dataTable, out)
 
-      local imNum = string.match(imgpath, '%d+')
-      labels[i] = self.labels[imNum]
+    --   local imNum = string.match(imgpath, '%d+')
+    --   table.insert(scalarTable, self.labels[imNum])      
+      table.insert(scalarTable, self.imageClass[indices[i]])
    end
-
---    local dataTable = {}
---    local labelTable = {}
---    for i=1,quantity do
---       -- load the sample
---       local imgpath = ffi.string(torch.data(self.imagePath[indices[i]]))
---       out = self:sampleHookTest(imgpath)
---       table.insert(dataTable, out)
-
---       local imNum = string.match(imgpath, '%d+')
---       table.insert(labelTable, self.labels[imNum])      
---    end
---    local data, labels = tableToOutput(self, dataTable, labelTable)
-   return data, labels
+   local data, scalarLabels, labels = tableToOutput(self, dataTable, scalarTable)
+   return data, scalarLabels, labels
 end
 
 function dataset:test(quantity)

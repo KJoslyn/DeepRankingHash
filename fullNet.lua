@@ -13,6 +13,7 @@ function loadStandardPackages()
   require 'cutorch'
   require 'cunn'
   require 'cudnn'
+  require 'imagenetloader.dataset'
 
 end -- end loadPackages()
 
@@ -107,6 +108,9 @@ function loadFullModel(modelType, lrMultForHashLayer, loadSiameseModels)
 end
 
 function loadData() 
+
+  local imageRootPath = g.datasetPath .. 'ImageData/Flickr'
+  d.dataset = imageLoaderimageLoader{path=imageRootPath, sampleSize={3,227,227}, splitFolders={'training'}}
 
   if not d.trainset then
       d.trainset = {}

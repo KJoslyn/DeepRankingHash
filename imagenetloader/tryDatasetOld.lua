@@ -1,11 +1,11 @@
-require 'chex'
+require 'dataset'
 local ffi = require 'ffi'
-require 'gfx.js'
 
-dataset = chex.dataset{paths={'../../toyset'}, sampleSize={3,256,226}}
+-- dataset = imageLoader{path='/home/kjoslyn/datasets/mirflickr', split=100, sampleSize={3,227,227}, splitFolders={'training'}}
+dataset = imageLoader{path='/home/kejosl/Datasets/mirflickr/ImageData', split=100, sampleSize={3,227,227}, splitFolders={'training'}}
 
-print('Saving to test.t7')
-torch.save('test.t7', dataset)
+-- print('Saving to test.t7')
+-- torch.save('test.t7', dataset)
 
 print('Class names', dataset.classes)
 print('Total images in dataset: ' .. dataset:size())
@@ -35,7 +35,6 @@ local inputs, labels = dataset:sample()
 print('Size of 1 training sample')
 print(#inputs)
 print('1 training label: ' .. labels)
-gfx.image(inputs)
 
 print('Getting 2 training samples')
 local inputs, labels = dataset:sample(2)
@@ -43,17 +42,15 @@ print('Size of 2 training samples')
 print(#inputs)
 print('Size of 1 training labels')
 print(#labels)
-gfx.image(inputs)
 
-
-print('Getting test samples')
-local count = 0
-for inputs, labels in dataset:test(128) do
-   print(#inputs)
-   print(#labels)
-   count = count + 1
-   print(count)
-end
+-- print('Getting test samples')
+-- local count = 0
+-- for inputs, labels in dataset:test(128) do
+--    print(#inputs)
+--    print(#labels)
+--    count = count + 1
+--    print(count)
+-- end
 
 
 
