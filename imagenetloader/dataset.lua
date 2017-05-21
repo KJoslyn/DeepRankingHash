@@ -43,11 +43,6 @@ local initcheck = argcheck{
     type="table",
     help="examples: training, val, query, pretraining"},
 
-   {name="split",
-    type="number",
-    help="Percentage of split to go to Training",
-    default = 90},
-
    {name="samplingMode",
     type="string",
     help="Sampling mode: random | balanced ",
@@ -94,7 +89,10 @@ function dataset:__init(...)
    local labels = matio.load(self.path .. '/labels.mat')
    self.labels = labels.labels
 --    local avgStd = matio.load(path .. '/avgStdevTrainSet.mat')
+   local avgStd = torch.load(self.path .. '/avgStdevTrainSet.t7')
 --    avgStd = avgStd.avgStd
+   self.channelAvgs = avgStd.means
+   self.channelStds = avgStd.stdev
 --    self.channelAvgs = avgStd.means:reshape(3)
 --    self.channelStds = avgStd.stdev:reshape(3)
 
@@ -151,8 +149,8 @@ function dataset:__init(...)
    self.imageClass = torch.LongTensor() -- class index of each image (class index in self.classes)
    self.classList = {}                  -- index of imageList to each image of a particular class
    
-   print('running "find" on each class directory, and concatenate all' 
-         .. ' those filenames into a single file containing all image paths for a given class')
+--    print('running "find" on each class directory, and concatenate all'
+--        .. ' those filenames into a single file containing all image paths for a given class')
    -- so, generates one file per class
    local classFindFiles = {}
    for i=1,#self.classes do
@@ -160,20 +158,7 @@ function dataset:__init(...)
    end
    local combinedFindList = os.tmpname();
    
-   local tmpfile = os.tmpname()
-   local tmphandle = assert(io.open(tmpfile, 'w'))
    -- iterate over classes
-   print("--Classes")
-   print(self.classes)
-   print("--Classpaths")
-   print(classPaths)
-   print("--classFindFiles")
-   print(classFindFiles)
-   print("--find")
-   print(find)
-   print("--findOptions")
-   print(findOptions)
-
    local tmpfile = os.tmpname()
    local tmphandle = assert(io.open(tmpfile, 'w'))
    -- iterate over classes
@@ -189,7 +174,7 @@ function dataset:__init(...)
    os.execute('bash ' .. tmpfile)
    os.execute('rm -f ' .. tmpfile)
    
-   print('now combine all the files to a single large file')
+--    print('Now combine all the files to a single large file')
    local tmpfile = os.tmpname()
    local tmphandle = assert(io.open(tmpfile, 'w'))
    -- concat all finds to a single large file in the order of self.classes
@@ -202,7 +187,7 @@ function dataset:__init(...)
    os.execute('rm -f ' .. tmpfile)
    
    --==========================================================================
-   print('load the large concatenated list of sample paths to self.imagePath')
+--    print('Load the large concatenated list of sample paths to self.imagePath')
    local maxPathLength = tonumber(sys.fexecute(wc .. " -L '" 
                                                   .. combinedFindList .. "' |" 
                                                   .. cut .. " -f1 -d' '")) + 1
@@ -227,7 +212,7 @@ function dataset:__init(...)
    self.numSamples = self.imagePath:size(1)
    if self.verbose then print(self.numSamples ..  ' samples found.') end
    --==========================================================================
-   print('Updating classList and imageClass appropriately')
+--    print('Updating classList and imageClass appropriately')
    self.imageClass:resize(self.numSamples)
    local runningIndex = 0
    for i=1,#self.classes do
@@ -239,6 +224,7 @@ function dataset:__init(...)
          error('Class has zero samples')
       else
          self.classList[i] = torch.linspace(runningIndex + 1, runningIndex + length, length):long()
+         self.classList[self.classes[i]] = self.classList[i]
          self.imageClass[{{runningIndex + 1, runningIndex + length}}]:fill(i)
       end
       runningIndex = runningIndex + length
@@ -246,7 +232,7 @@ function dataset:__init(...)
 
    --==========================================================================
    -- clean up temporary files
-   print('Cleaning up temporary files')
+--    print('Cleaning up temporary files')
    local tmpfilelistall = ''
    for i=1,#(classFindFiles) do
       tmpfilelistall = tmpfilelistall .. ' "' .. classFindFiles[i] .. '"'
@@ -260,7 +246,7 @@ function dataset:__init(...)
    --==========================================================================
 end
 
-local function doGet(self, class, i1, i2)
+local function doGet(self, classes, i1, i2)
 
    local indices, quantity
    if type(i1) == 'number' then
@@ -282,39 +268,35 @@ local function doGet(self, class, i1, i2)
 
    local data = torch.FloatTensor(quantity, self.sampleSize[1], self.sampleSize[2], self.sampleSize[3])
    local labels = torch.ByteTensor(quantity, 24)
+   if classes then
+      imgPathIndices = torch.LongTensor()
+      for c = 1,#classes do
+         imgPathIndices = torch.cat(imgPathIndices, self.classList[classes[c]], 1)
+      end
+   end
    for i=1,quantity do
       -- load the sample
       local imgpath 
-      if class then
-         imgpath = ffi.string(torch.data(self.imagePath[self.classList[class][indices[i]]]))
+      if classes then
+         imgpath = ffi.string(torch.data(self.imagePath[imgPathIndices[indices[i]]]))
       else
          imgpath = ffi.string(torch.data(self.imagePath[indices[i]]))
       end
-      data[i] = self:sampleHookTest(imgpath)
+      data[i] = self:defaultSampleHook(imgpath)
 
-      local imNum = string.match(imgpath, '%d+')
+    --   local imNum = string.match(imgpath, '%d+')
+      local imNum = 1
       labels[i] = self.labels[imNum]
 
+      -- For debugging purposes only
       if quantity == 1 then
          print(imgpath)
       end
    end
-
---    local dataTable = {}
---    local labelTable = {}
---    for i=1,quantity do
---       -- load the sample
---       local imgpath = ffi.string(torch.data(self.imagePath[indices[i]]))
---       out = self:sampleHookTest(imgpath)
---       table.insert(dataTable, out)
-
---       local imNum = string.match(imgpath, '%d+')
---       table.insert(labelTable, self.labels[imNum])      
---    end
---    local data, labels = tableToOutput(self, dataTable, labelTable)
    return data, labels
 end
 
+-- TODO: Remove?
 -- converts a table of samples (and corresponding labels) to a clean tensor
 local function tableToOutput(self, dataTable, labelTable)
    local data, labels
@@ -333,7 +315,6 @@ local function tableToOutput(self, dataTable, labelTable)
    return data, labels
 end
 
--- size(), size(class)
 function dataset:size(class, list)
    list = list or self.classList
    if not class then
@@ -343,12 +324,10 @@ function dataset:size(class, list)
    end
 end
 
--- size(), size(class)
 function dataset:sizeTrain()
    return self:size('training')
 end
 
--- size(), size(class)
 function dataset:sizeTest()
    return self:size('query')
 end
@@ -367,20 +346,17 @@ function dataset:defaultSampleHook(imgpath)
    out:load(imgpath, self.loadSize[3], self.loadSize[2])
    :size(self.sampleSize[3], self.sampleSize[2])
    out = out:toTensor('float','RGB','DHW') -- multiply by 255 if using matlab-generated channel avgs and stdevs
---    -- Normalization
---    for i=1,3 do
---       out[{ {i}, {}, {} }]:add(-self.channelAvgs[i])
---       out[{ {i}, {}, {} }]:div(self.channelStds[i])
---    end
+   -- Normalization
+   for i=1,3 do
+      out[{ {i}, {}, {} }]:add(-self.channelAvgs[i])
+      out[{ {i}, {}, {} }]:div(self.channelStds[i])
+   end
    return out
 end
 
 -- TODO: fix or remove
 -- sampler, samples from the training set.
 function dataset:sample(quantity)
-   if self.split == 0 then 
-      error('No training mode when split is set to 0') 
-   end
    quantity = quantity or 1
    local dataTable = {}
    local scalarTable = {}   
@@ -406,11 +382,16 @@ function dataset:get(i1, i2)
    return doGet(self, nil, i1, i2)
 end
 
--- getByClass
-function dataset:getByClass(class, i1, i2)
-   return doGet(self, class, i1, i2)
-end
+function dataset:getBySplit(classArg, i1, i2)
+    -- 'Class' means the same thing as 'split' in this sense.
+    -- classArg can be a string or a table of strings, belonging to 'training', 'query', 'val', or 'pretraining'.
 
-function dataset:getByClasses(classes, i1, i2)
+   local classes
+   if type(classArg) == 'string' then
+      classes = {classArg}
+   elseif type(classArg) == 'table' then
+      classes = classArg
+   end
+
    return doGet(self, classes, i1, i2)
 end

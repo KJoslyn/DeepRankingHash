@@ -23,7 +23,7 @@ end
 function getImageAndTextDataMirflickr()
 
     -- Tags for text data are also included
-    local split = torch.load('/home/kjoslyn/datasets/mirflickr/datasetSplitUnnormalized.t7')
+    local split = torch.load('/home/kjoslyn/datasets/mirflickr/old/datasetSplitUnnormalized.t7')
 
     -- Mirflickr data is unnormalized
     local mean = {} -- store the mean, to normalize the test set in the future
