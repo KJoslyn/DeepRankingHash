@@ -17,7 +17,7 @@ function loadStandardPackages()
 
 end -- end loadPackages()
 
-function loadParamsAndPackages(dataset, iterationsPerEpoch)
+function loadParamsAndPackages(datasetType, iterationsPerEpoch)
 
   if not nn then
     loadStandardPackages()
@@ -60,18 +60,18 @@ function loadParamsAndPackages(dataset, iterationsPerEpoch)
 
   -- Dataset
   local snapshotDatasetDir
-  if dataset == 'mir' then
+  if datasetType == 'mir' then
       p.numClasses = 24
       snapshotDatasetDir = '/mirflickr'
       g.datasetPath = '/home/kjoslyn/datasets/mirflickr/'
-  elseif dataset == 'nus' then
+  elseif datasetType == 'nus' then
       p.numClasses = 21
       snapshotDatasetDir = '/nuswide'
       g.datasetPath = '/home/kjoslyn/datasets/nuswide/'
   else
-      print("Error: Unrecognized dataset!! Should be mir or nus")
+      print("Error: Unrecognized datasetType!! Should be mir or nus")
   end
-  p.datasetType = dataset
+  p.datasetType = datasetType
 
   -- Fixed Parameters
   I = 1 -- Table index for image modality - This is its own global variable
@@ -110,7 +110,8 @@ end
 function loadData() 
 
   local imageRootPath = g.datasetPath .. 'ImageData/Flickr'
-  d.dataset = imageLoaderimageLoader{path=imageRootPath, sampleSize={3,227,227}, splitFolders={'training'}}
+  local imageRootPath = g.datasetPath .. 'ImageData'
+  d.dataset = imageLoader{path=imageRootPath, sampleSize={3,227,227}, splitFolders={'training', 'pretraining', 'val', 'query'}}
 
   if not d.trainset then
       d.trainset = {}
@@ -482,9 +483,9 @@ function doOneEpochOnModality(modality, evalEpoch, logResults)
   return avgEpochLoss, crossModalEpochLoss
 end
 
-function runEverything(dataset, iterationsPerEpoch, modelType, lrMultForHashLayer, kNum, modality, simWeight, balanceWeight, quantWeight)
+function runEverything(datasetType, iterationsPerEpoch, modelType, lrMultForHashLayer, kNum, modality, simWeight, balanceWeight, quantWeight)
 
-  loadParamsAndPackages(dataset, iterationsPerEpoch)
+  loadParamsAndPackages(datasetType, iterationsPerEpoch)
   loadFullModel(modelType, lrMultForHashLayer)
   loadData()
   loadTrainAndValSubsets(kNum)

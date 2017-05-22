@@ -2,7 +2,7 @@
 -- //////////////////////////////////////////
 -- Typical flow:
 -- require 'textNet'
--- loadPackagesAndModel(dataset) -- 'mir' or 'nus'
+-- loadPackagesAndModel(datasetType) -- 'mir' or 'nus'
 -- loadData(useKFold, small) -- uses dataLoader.lua. 1 input parameter- true for 1000 instanes (small)
 -- optional: loadModelSnapshot -- from createModel.lua
 -- trainAndEvaluate(kFoldNum, batchSize, learningRate, numEpochs, startEpoch, printTestsetAcc)
@@ -10,7 +10,7 @@
 -- For nuswide, batchsize of 100 and lr of .1 works well. Epoch 500-750 good, overfitting after that
 -- /////////////////////////////////////////
 
-function loadPackagesAndModel(dataset)
+function loadPackagesAndModel(datasetType)
 
     require 'nn'
     require 'optim'
@@ -32,18 +32,18 @@ function loadPackagesAndModel(dataset)
     matio = require 'matio'
 
     local snapshotDatasetDir
-    if dataset == 'mir' then
+    if datasetType == 'mir' then
         p.numClasses = 24
         p.tagDim = 1075
         snapshotDatasetDir = '/mirflickr'
-    elseif dataset == 'nus' then
+    elseif datasetType == 'nus' then
         p.numClasses = 21
         p.tagDim = 1000
         snapshotDatasetDir = '/nuswide'
     else
-        print("Error: Unrecognized dataset!! Should be mir or nus")
+        print("Error: Unrecognized datasetType!! Should be mir or nus")
     end
-    p.datasetType = dataset
+    p.datasetType = datasetType
 
     g.filePath = '/home/kjoslyn/kevin/' -- server
     g.snapshotDir = '/home/kjoslyn/kevin/Project/snapshots' .. snapshotDatasetDir

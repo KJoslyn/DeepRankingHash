@@ -2,13 +2,13 @@
 -- //////////////////////////////////////////
 -- Typical flow:
 -- require 'imageNet'
--- loadPackagesAndModel(dataset) -- 'mir' or 'nus'
+-- loadPackagesAndModel(datasetType) -- 'mir' or 'nus'
 -- loadData() -- uses dataLoader.lua. 1 input parameter- true for 1000 instanes (small)
 -- optional: loadModelSnapshot -- from createModel.lua
 -- trainAndEvaluate()
 -- /////////////////////////////////////////
 
-function loadPackagesAndModel(dataset)
+function loadPackagesAndModel(datasetType)
 
     require 'nn'
     require 'optim'
@@ -34,16 +34,16 @@ function loadPackagesAndModel(dataset)
     matio = require 'matio'
 
     local snapshotDatasetDir
-    if dataset == 'mir' then
+    if datasetType == 'mir' then
         p.numClasses = 24
         snapshotDatasetDir = '/mirflickr'
-    elseif dataset == 'nus' then
+    elseif datasetType == 'nus' then
         p.numClasses = 21
         snapshotDatasetDir = '/nuswide'
     else
-        print("Error: Unrecognized dataset!! Should be mir or nus")
+        print("Error: Unrecognized datasetType!! Should be mir or nus")
     end
-    p.datasetType = dataset
+    p.datasetType = datasetType
 
     g.filePath = '/home/kjoslyn/kevin/' -- server
     g.snapshotDir = '/home/kjoslyn/kevin/Project/snapshots' .. snapshotDatasetDir
@@ -95,6 +95,9 @@ end
 
 function loadData(useKFold, small)
 
+    local imageRootPath = g.datasetPath .. 'ImageData'
+    d.dataset = imageLoader{path=imageRootPath, sampleSize={3,227,227}, splitFolders={'training', 'pretraining', 'val', 'query'}}
+     
     if p.datasetType == 'mir' then
         d.trainset, d.testset, d.valset = getImageNetDataMirflickr()
     elseif p.datasetType == 'nus' then
