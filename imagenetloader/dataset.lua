@@ -1,4 +1,11 @@
 require 'torch'
+local threads = require 'threads'
+threads.Threads.serialization('threads.sharedserialize')
+
+local status,tds = pcall(require, 'tds')
+tds = status and tds or nil
+assert(status)
+
 local ffi = require 'ffi'
 local dir = require 'pl.dir'
 local tablex = require 'pl.tablex'
@@ -81,6 +88,10 @@ function dataset:__init(...)
 
    if not self.sampleHookTrain then self.sampleHookTrain = self.defaultSampleHook end
    if not self.sampleHookTest then self.sampleHookTest = self.defaultSampleHook end
+
+   -- TODO: Handle this better
+   nThreads = 8
+   pool = threads.Threads(nThreads)
 
    -- Load labels and channel avgs and stdevs
    if not matio then
@@ -246,7 +257,7 @@ function dataset:__init(...)
    --==========================================================================
 end
 
-local function doGet(self, classes, i1, i2)
+local function prepareForDoGet(self, classes, i1, i2)
 
    local indices, quantity
    if type(i1) == 'number' then
@@ -268,12 +279,75 @@ local function doGet(self, classes, i1, i2)
 
    local data = torch.FloatTensor(quantity, self.sampleSize[1], self.sampleSize[2], self.sampleSize[3])
    local labels = torch.ByteTensor(quantity, 24)
+   local imgPathIndices
    if classes then
       imgPathIndices = torch.LongTensor()
       for c = 1,#classes do
          imgPathIndices = torch.cat(imgPathIndices, self.classList[classes[c]], 1)
       end
    end
+
+   return indices, quantity, imgPathIndices, data, labels
+end
+
+-- local function doGetParallel(self, indices, quantity, imgPathIndices, data, labels)
+local function doGetParallel(self, classes, i1, i2)
+
+   local indices, quantity, imgPathIndices, data, labels = prepareForDoGet(self, classes, i1, i2)
+
+   local self_labels = self.labels
+   local self_imagePath = self.imagePath
+   local ls = self.loadSize
+
+--    local nThreads = 16
+--    local pool = threads.Threads(nThreads)
+
+   for i = 1,quantity do
+      pool:addjob(function()
+         
+        local ffi = require 'ffi'
+        local gm = require 'graphicsmagick'
+         
+        local imgpath
+        if classes then
+            imgpath = ffi.string(torch.data(self_imagePath[imgPathIndices[indices[i]]]))
+        else
+            imgpath = ffi.string(torch.data(self_imagePath[indices[i]]))
+        end
+
+        local out = gm.Image()
+        out:load(imgpath, ls[3], ls[2])
+        out = out:toTensor('float','RGB','DHW') -- multiply by 255 if using matlab-generated channel avgs and stdevs
+
+        data[i] = out
+        local imNum = string.match(imgpath, '%d+')
+        labels[i] = self_labels[imNum]
+        if quantity == 1 then -- For debugging purposes
+           print(string.format('i = %d, imgpath = %s\n', i, imgpath))
+        end
+
+      end)
+   end
+
+   pool:synchronize()
+--    print(labels)
+--    pool:terminate()
+
+   return data, labels
+end
+
+local function loadImage(imgpath, loadSize)
+   local out = gm.Image()
+   out:load(imgpath, loadSize[3], loadSize[2])
+   --    :size(self.sampleSize[3], self.sampleSize[2])
+   out = out:toTensor('float','RGB','DHW') -- multiply by 255 if using matlab-generated channel avgs and stdevs
+   return out
+end
+
+local function doGet(self, classes, i1, i2)
+
+   local indices, quantity, imgPathIndices, data, labels = prepareForDoGet(self, classes, i1, i2)
+
    for i=1,quantity do
       -- load the sample
       local imgpath 
@@ -282,10 +356,10 @@ local function doGet(self, classes, i1, i2)
       else
          imgpath = ffi.string(torch.data(self.imagePath[indices[i]]))
       end
-      data[i] = self:defaultSampleHook(imgpath)
 
-    --   local imNum = string.match(imgpath, '%d+')
-      local imNum = 1
+      data[i] = loadImage(imgpath, self.loadSize)
+
+      local imNum = string.match(imgpath, '%d+')
       labels[i] = self.labels[imNum]
 
       -- For debugging purposes only
@@ -340,17 +414,33 @@ function dataset:sizePretraining()
    return self:size('pretraining')
 end
 
+function dataset:normalize(data)
+
+   for i=1,3 do
+      data[{ {}, {i}, {}, {} }]:add(-self.channelAvgs[i])
+      data[{ {}, {i}, {}, {} }]:div(self.channelStds[i])
+   end
+   return data
+end
+
+-- TODO: Remove
 -- by default, just load the image and return it
 function dataset:defaultSampleHook(imgpath)
+--    ldTimer:resume()
    local out = gm.Image()
    out:load(imgpath, self.loadSize[3], self.loadSize[2])
    :size(self.sampleSize[3], self.sampleSize[2])
+--    out:load('/home/kejosl/Datasets/mirflickr/ImageData/training/im14261.jpg', self.loadSize[3], self.loadSize[2])
+--    out:load('/home/kejosl/Datasets/mirflickr/ImageData/training/im14261.jpg', 500, 349)
    out = out:toTensor('float','RGB','DHW') -- multiply by 255 if using matlab-generated channel avgs and stdevs
+--    ldTimer:stop()
    -- Normalization
-   for i=1,3 do
-      out[{ {i}, {}, {} }]:add(-self.channelAvgs[i])
-      out[{ {i}, {}, {} }]:div(self.channelStds[i])
-   end
+--    nmTimer:resume()
+--    for i=1,3 do
+--       out[{ {i}, {}, {} }]:add(-self.channelAvgs[i])
+--       out[{ {i}, {}, {} }]:div(self.channelStds[i])
+--    end
+--    nmTimer:stop()
    return out
 end
 
@@ -378,8 +468,9 @@ function dataset:getImagePathByClass(class, index)
    return ffi.string(torch.data(self.imagePath[self.classList[class][index]]))
 end
 
+-- TODO: Remove
 function dataset:get(i1, i2)
-   return doGet(self, nil, i1, i2)
+   return doGetParallel(self, nil, i1, i2)
 end
 
 function dataset:getBySplit(classArg, i1, i2)
@@ -393,5 +484,21 @@ function dataset:getBySplit(classArg, i1, i2)
       classes = classArg
    end
 
-   return doGet(self, classes, i1, i2)
+   local quantity
+   if not i2 then 
+      quantity = 1
+   else
+      quantity = i2 - i1 + 1
+   end
+
+   local data, labels
+   if quantity > 8 then
+    --   data, labels = doGetParallel(self, indices, quantity, imgPathIndices, data, labels)
+      data, labels = doGetParallel(self, classes, i1, i2)
+   else
+      data, labels = doGet(self, classes, i1, i2)
+   end
+
+   data = self:normalize(data)
+   return data, labels
 end
