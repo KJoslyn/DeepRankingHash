@@ -1,4 +1,3 @@
-
 -- //////////////////////////////////////////
 -- Typical flow:
 -- require 'imageNet'
@@ -38,24 +37,22 @@ function loadPackagesAndModel(datasetType)
     if datasetType == 'mir' then
         p.numClasses = 24
         snapshotDatasetDir = '/mirflickr'
-        g.datasetPath = '/home/kjoslyn/datasets/mirflickr/'
-        g.plotNumEpochs = 5;
     elseif datasetType == 'nus' then
         p.numClasses = 21
         snapshotDatasetDir = '/nuswide'
-        g.datasetPath = '/home/kjoslyn/datasets/nuswide/'
-        g.plotNumEpochs = 1;
     else
         print("Error: Unrecognized datasetType!! Should be mir or nus")
     end
     p.datasetType = datasetType
 
     g.snapshotDir = '/home/kjoslyn/kevin/Project/snapshots' .. snapshotDatasetDir
+    g.datasetPath = '/home/kjoslyn/datasets/mirflickr/'
 
     -- //////////// Load image model
     m.imageClassifier = getImageModel()
 
     g.accIdx = 0
+    g.plotNumEpochs = 5;
     g.pastNAcc = torch.Tensor(g.plotNumEpochs)
     g.avgDataAcc = torch.Tensor()
     g.maxDataAcc = torch.Tensor()
@@ -66,14 +63,20 @@ function loadPackagesAndModel(datasetType)
     g.minDataLoss = torch.Tensor()
 end
 
-function getBatch(batchNum, batchSize, perm)
+function getBatch(kFoldNum, batchNum, batchSize, perm)
 
     startIndex = batchNum * batchSize + 1
     endIndex = math.min((batchNum + 1) * batchSize, Ntrain)
 
-    local batch = {}
-    -- batch.data, batch.label = d.dataset:getBySplit({'training', 'pretraining'}, 'I', startIndex, endIndex, perm)
-    batch.data, batch.label = d.dataset:getBySplit({'training'}, 'I', startIndex, endIndex, perm)
+    batchPerm = perm[ {{ startIndex, endIndex }} ]
+    batch = {}
+    if kFoldNum == -1 then
+        batch.data = d.trainset.data:index(1, batchPerm)
+        batch.label = d.trainset.label:index(1, batchPerm)
+    else
+        batch.data = KFoldTrainSet[kFoldNum].data:index(1, batchPerm)
+        batch.label = KFoldTrainSet[kFoldNum].label:index(1, batchPerm)
+    end
     batch.data = batch.data:cuda()
     batch.label = batch.label:cuda()
 
@@ -93,35 +96,64 @@ end
 function loadData(useKFold, small)
 
     local imageRootPath = g.datasetPath .. 'ImageData'
-    d.dataset = imageLoader{path=imageRootPath, sampleSize={3,227,227}, splitFolders={'training', 'pretraining', 'val', 'query'}}
 
-    -- Ntrain = d.dataset:sizeTrain() + d.dataset:sizePretraining()
-    Ntrain = d.dataset:sizeTrain()
-    Ntest = d.dataset:sizeTest()
-    Nval = d.dataset:sizeVal()
+    if p.datasetType == 'mir' then
+        d.trainset, d.testset, d.valset = getImageNetDataMirflickr()
+    elseif p.datasetType == 'nus' then
+        d.trainset, d.testset, d.valset = getImageAndTextDataNuswide()
+    end
+    -- Don't need tags for image network
+    d.trainset.tags = nil
+    d.testset.tags = nil
+    d.valset.tags = nil
 
-    -- TODO: Remove
-    d.trainset = {}
-    d.trainset.data, d.trainset.label = d.dataset:getBySplit('training', 'I', 1, Ntrain)
+    totTrain = d.trainset.data:size(1)
+    Ntest = d.testset.data:size(1)
 
-    d.valset = {}
-    d.testset = {}
-    d.valset.data, d.valset.label = d.dataset:getBySplit('val', 'I', 1, Nval)
-    d.testset.data, d.testset.label = d.dataset:getBySplit('query', 'I', 1, Ntest)
-
-    collectgarbage()
+    if useKFold then
+        KFoldTrainSet, KFoldValSet = getKFoldSplit(d.trainset, 5)
+    end
 end
 
-function trainAndEvaluate(batchSize, learningRate, momentum, weightDecay, numEpochs, printTrainsetAcc)
+-- function getKFoldSplit(trainset, K)
+
+--     local sizeVal = math.ceil(totTrain / K)
+
+--     KFoldTrainSet = {}
+--     KFoldValSet = {}
+
+--     for k = 1,K do
+--         valStartIdx = (k-1) * sizeVal + 1
+--         valEndIdx = math.min(k * sizeVal, totTrain)
+
+--         KFoldTrainSet[k] = {}
+--         KFoldValSet[k] = {}
+
+--         KFoldValSet[k].data = d.trainset.data[ {{ valStartIdx, valEndIdx }} ]
+--         KFoldValSet[k].label = d.trainset.label[ {{ valStartIdx, valEndIdx }} ]
+
+--         sizeTrain = totTrain - KFoldValSet[k].data:size(1)
+--         KFoldTrainSet[k].data = torch.FloatTensor(sizeTrain, 3, 227, 227)
+--         KFoldTrainSet[k].label = torch.LongTensor(sizeTrain, p.numClasses)
+
+--         markerIdx = 1
+--         if valStartIdx ~= 1 then
+--             KFoldTrainSet[k].data[ {{ 1, valStartIdx - 1 }} ] = d.trainset.data[ {{ 1, valStartIdx - 1 }} ]
+--             KFoldTrainSet[k].label[ {{ 1, valStartIdx - 1 }} ] = d.trainset.label[ {{ 1, valStartIdx - 1 }} ]
+--             markerIdx = valStartIdx
+--         end 
+--         if valEndIdx ~= totTrain then
+--             KFoldTrainSet[k].data[ {{ markerIdx, sizeTrain }} ] = d.trainset.data[ {{ valEndIdx + 1, totTrain }} ]
+--             KFoldTrainSet[k].label[ {{ markerIdx, sizeTrain }} ] = d.trainset.label[ {{ valEndIdx + 1, totTrain }} ]
+--         end 
+--     end
+
+--     return KFoldTrainSet, KFoldValSet
+-- end
+
+function trainAndEvaluate(kFoldNum, batchSize, learningRate, momentum, numEpochs, startEpoch, printTrainsetAcc)
     -- kFoldNum is the number of the validation set that will be used for training in this run
     -- use -1 for no validation set
-
-    local startEpoch
-    if g.avgDataAcc:dim() == 0 then
-       startEpoch = 1
-    else
-       startEpoch = g.avgDataAcc:size(1) + 1
-    end
 
     if not g.plotStartEpoch then
         g.plotStartEpoch = startEpoch
@@ -145,19 +177,35 @@ function trainAndEvaluate(batchSize, learningRate, momentum, weightDecay, numEpo
         -- learningRateDecay = 1e-7
         -- learningRate = 1e-3,
         -- learningRateDecay = 1e-4,
-        weightDecay = weightDecay, -- .01?
+        -- weightDecay = 0.01
         momentum = momentum -- .9?
     }
 
+    if kFoldNum == -1 then
+        Nval = 0
+    else
+        Nval = KFoldValSet[kFoldNum].data:size(1)
+    end
+    Ntrain = totTrain - Nval 
+
     -- batchSize = 128
+
+    -- if kFoldNum == -1 then
+    --     Nval = 0
+    -- else
+    --     Nval = KFoldValSet[kFoldNum].data:size(1)
+    -- end
 
     numBatches = math.ceil(Ntrain / batchSize)
 
     m.imageClassifier:training()
 
+    if not startEpoch then
+        startEpoch = 1
+    end
     local epochTimer = torch.Timer()
 
-    for epoch = startEpoch, startEpoch + numEpochs do
+    for epoch = startEpoch, numEpochs do
 
         epochTimer:reset()
         epochTimer:resume()
@@ -168,7 +216,7 @@ function trainAndEvaluate(batchSize, learningRate, momentum, weightDecay, numEpo
 
         for batchNum = 0, numBatches - 1 do
 
-            trainBatch = getBatch(batchNum, batchSize, perm)
+            local trainBatch = getBatch(kFoldNum, batchNum, batchSize, perm)
             collectgarbage()
 
             function feval(x)
@@ -179,7 +227,7 @@ function trainAndEvaluate(batchSize, learningRate, momentum, weightDecay, numEpo
 
                 gradParams:zero()
 
-                outputs = m.imageClassifier:forward(trainBatch.data)
+                local outputs = m.imageClassifier:forward(trainBatch.data)
                 local loss = criterion:forward(outputs, trainBatch.label)
 
                 totalLoss = totalLoss + loss
@@ -207,14 +255,9 @@ function trainAndEvaluate(batchSize, learningRate, momentum, weightDecay, numEpo
         -- if kFoldNum ~= -1 then
         --     classAcc = getClassAccuracy(KFoldValSet[kFoldNum].data, KFoldValSet[kFoldNum].label:cuda())
         --     print(string.format("Epoch %d: Val set class accuracy = %.2f\n", epoch, classAcc))
-        local valClassAcc
         if d.valset then
-            valClassAcc = getClassAccuracy(d.valset.data, d.valset.label:cuda())
-            print(string.format("Epoch %d: Val set class accuracy = %.2f", epoch, valClassAcc))
-        end
-        if d.trainset then
-            local trainClassAcc = getClassAccuracy(d.trainset.data, d.trainset.label:cuda())
-            print(string.format("Epoch %d: Train set class accuracy = %.2f", epoch, trainClassAcc))
+            classAcc = getClassAccuracy(d.valset.data, d.valset.label:cuda())
+            print(string.format("Epoch %d: Val set class accuracy = %.2f", epoch, classAcc))
         end
         print(string.format('Epoch time: %.2f seconds\n', epochTimer:time().real))
         -- if printTrainsetAcc then
@@ -224,7 +267,7 @@ function trainAndEvaluate(batchSize, learningRate, momentum, weightDecay, numEpo
         m.imageClassifier:training()
 
         g.accIdx = g.accIdx + 1
-        g.pastNAcc[g.accIdx] = valClassAcc
+        g.pastNAcc[g.accIdx] = classAcc
         g.pastNLoss[g.accIdx] = math.min(avgLoss * 100, 100) -- Scale loss to fit in the same y axes as accuracy
         if g.accIdx % g.plotNumEpochs == 0 then
             g.avgDataAcc = g.avgDataAcc:cat(torch.Tensor({g.pastNAcc:mean()}))
@@ -237,8 +280,7 @@ function trainAndEvaluate(batchSize, learningRate, momentum, weightDecay, numEpo
             g.accIdx = 0
         end
 
-        if epoch == 10 or epoch == 20 or epoch == 30 or epoch == 40 or epoch == 50 then
-        -- if epoch == 300 or epoch == 500 or epoch == 750 or epoch == 900 or epoch == 1000 then
+        if epoch == 300 or epoch == 500 or epoch == 750 or epoch == 900 or epoch == 1000 then
             local paramsToSave, gp = m.imageClassifier:getParameters()
             local snapshotFile
             local date = os.date("*t", os.time())

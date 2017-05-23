@@ -30,17 +30,16 @@ local initcheck = argcheck{
           if string.match(filepath, 'labels.mat') then
              labelFileFound = true
           end
-          avgStdFileFound = true
-        --   if string.match(dirpath, 'avgStdTrainSet.mat') then
-        --      avgStdFileFound = true
-        --   end
+          if string.match(filepath, 'avgStdevTrainSet.t7') then
+             avgStdFileFound = true
+          end
        end
           
        return labelFileFound and avgStdFileFound
    end,
     name="path",
     type="string",
-    help="Path of directory with images, containing folders \'training\', \'val\', \'query\', \'pretraining\', and avgStdTrainSet.mat and labels.mat"}, 
+    help="Path of directory with images, containing folders \'training\', \'val\', \'query\', \'pretraining\', and avgStdevTrainSet.t7 and labels.mat"}, 
 
    {name="sampleSize",
     type="table",
@@ -97,15 +96,17 @@ function dataset:__init(...)
    if not matio then
       matio = require 'matio'
    end
+
    local labels = matio.load(self.path .. '/labels.mat')
    self.labels = labels.labels
+
+   local tags = matio.load(self.path .. '/tags.mat')
+   self.tags = tags.tags
+
 --    local avgStd = matio.load(path .. '/avgStdevTrainSet.mat')
    local avgStd = torch.load(self.path .. '/avgStdevTrainSet.t7')
---    avgStd = avgStd.avgStd
    self.channelAvgs = avgStd.means
    self.channelStds = avgStd.stdev
---    self.channelAvgs = avgStd.means:reshape(3)
---    self.channelStds = avgStd.stdev:reshape(3)
 
    -- find class names
    self.classes = {}
@@ -257,7 +258,7 @@ function dataset:__init(...)
    --==========================================================================
 end
 
-local function prepareForDoGet(self, classes, i1, i2)
+local function prepareForDoGet(self, modality, classes, i1, i2)
 
    local indices, quantity
    if type(i1) == 'number' then
@@ -277,8 +278,13 @@ local function prepareForDoGet(self, classes, i1, i2)
    assert(quantity > 0)
    -- now that indices has been initialized, get the samples
 
-   local data = torch.FloatTensor(quantity, self.sampleSize[1], self.sampleSize[2], self.sampleSize[3])
-   local labels = torch.ByteTensor(quantity, 24)
+   local data
+   if modality == 'I' then
+      data = torch.FloatTensor(quantity, self.sampleSize[1], self.sampleSize[2], self.sampleSize[3])
+   else
+      data = torch.FloatTensor(quantity, self.tags:size(2))
+   end
+   local labels = torch.FloatTensor(quantity, self.labels:size(2))
    local imgPathIndices
    if classes then
       imgPathIndices = torch.LongTensor()
@@ -290,10 +296,10 @@ local function prepareForDoGet(self, classes, i1, i2)
    return indices, quantity, imgPathIndices, data, labels
 end
 
--- local function doGetParallel(self, indices, quantity, imgPathIndices, data, labels)
-local function doGetParallel(self, classes, i1, i2)
+-- local function doGetImagesParallel(self, indices, quantity, imgPathIndices, data, labels)
+local function doGetImagesParallel(self, classes, i1, i2, perm)
 
-   local indices, quantity, imgPathIndices, data, labels = prepareForDoGet(self, classes, i1, i2)
+   local indices, quantity, imgPathIndices, data, labels = prepareForDoGet(self, 'I', classes, i1, i2)
 
    local self_labels = self.labels
    local self_imagePath = self.imagePath
@@ -307,12 +313,17 @@ local function doGetParallel(self, classes, i1, i2)
          
         local ffi = require 'ffi'
         local gm = require 'graphicsmagick'
+
+        local idx = indices[i]
+        if perm then
+           idx = perm[idx]
+        end
          
         local imgpath
         if classes then
-            imgpath = ffi.string(torch.data(self_imagePath[imgPathIndices[indices[i]]]))
+            imgpath = ffi.string(torch.data(self_imagePath[imgPathIndices[idx]]))
         else
-            imgpath = ffi.string(torch.data(self_imagePath[indices[i]]))
+            imgpath = ffi.string(torch.data(self_imagePath[idx]))
         end
 
         local out = gm.Image()
@@ -344,23 +355,32 @@ local function loadImage(imgpath, loadSize)
    return out
 end
 
-local function doGet(self, classes, i1, i2)
+local function doGetModality(self, modality, classes, i1, i2, perm)
 
-   local indices, quantity, imgPathIndices, data, labels = prepareForDoGet(self, classes, i1, i2)
+   local indices, quantity, imgPathIndices, data, labels = prepareForDoGet(self, modality, classes, i1, i2)
 
    for i=1,quantity do
+
+      local idx = indices[i]
+      if perm then
+         idx = perm[idx]
+      end
+
       -- load the sample
       local imgpath 
       if classes then
-         imgpath = ffi.string(torch.data(self.imagePath[imgPathIndices[indices[i]]]))
+         imgpath = ffi.string(torch.data(self.imagePath[imgPathIndices[idx]]))
       else
-         imgpath = ffi.string(torch.data(self.imagePath[indices[i]]))
+         imgpath = ffi.string(torch.data(self.imagePath[idx]))
       end
-
-      data[i] = loadImage(imgpath, self.loadSize)
 
       local imNum = string.match(imgpath, '%d+')
       labels[i] = self.labels[imNum]
+      if modality == 'I' then
+         data[i] = loadImage(imgpath, self.loadSize)
+      else
+         data[i] = self.tags[imNum]
+      end
 
       -- For debugging purposes only
       if quantity == 1 then
@@ -380,7 +400,7 @@ local function tableToOutput(self, dataTable, labelTable)
       labels = labelTable[1]
    else
       data = torch.FloatTensor(quantity, self.sampleSize[1], self.sampleSize[2], self.sampleSize[3])
-      labels = torch.ByteTensor(quantity, 24)
+      labels = torch.ByteTensor(quantity, 24) -- TODO: This is only for mirflickr
       for i=1,#dataTable do
          data[{ {i}, {}, {}, {} }]:copy(dataTable[i])
 	     labels[{ {i}, {} }]:copy(labelTable[i])
@@ -468,12 +488,7 @@ function dataset:getImagePathByClass(class, index)
    return ffi.string(torch.data(self.imagePath[self.classList[class][index]]))
 end
 
--- TODO: Remove
-function dataset:get(i1, i2)
-   return doGetParallel(self, nil, i1, i2)
-end
-
-function dataset:getBySplit(classArg, i1, i2)
+function dataset:getBySplit(classArg, modality, i1, i2, permutation)
     -- 'Class' means the same thing as 'split' in this sense.
     -- classArg can be a string or a table of strings, belonging to 'training', 'query', 'val', or 'pretraining'.
 
@@ -492,13 +507,19 @@ function dataset:getBySplit(classArg, i1, i2)
    end
 
    local data, labels
-   if quantity > 8 then
-    --   data, labels = doGetParallel(self, indices, quantity, imgPathIndices, data, labels)
-      data, labels = doGetParallel(self, classes, i1, i2)
+
+   if modality == 'I' then
+      if quantity > 8 then
+         data, labels = doGetImagesParallel(self, classes, i1, i2, permutation)
+      else
+         data, labels = doGetModality(self, 'I', classes, i1, i2, permutation)
+      end
+      data = self:normalize(data)
+   elseif modality == 'X' then
+      data, labels = doGetModality(self, 'X', classes, i1, i2, permutation)
    else
-      data, labels = doGet(self, classes, i1, i2)
+      print('Error in getBySplit: unrecognized modality')
    end
 
-   data = self:normalize(data)
    return data, labels
 end
