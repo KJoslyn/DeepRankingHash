@@ -31,11 +31,11 @@ end
 
 function getClassAccuracyForModality(modality)
     if modality == I then
-        data = d.trainset[I]:index(1, d.trainImages)
-        labels = d.train_labels_image:float():index(1, d.trainImages):cuda() -- TODO: is float() necessary?
+        data = d.trainset[I].data
+        labels = d.trainset[I].label:float()
     else
-        data = d.trainset[X]:index(1, d.trainTexts)
-        labels = d.train_labels_text:float():index(1, d.trainTexts):cuda()
+        data = d.trainset[X].data
+        labels = d.trainset[X].label:float()
     end
     return getClassAccuracy(data, labels)
 end
@@ -118,19 +118,19 @@ function getQueryAndDBCodes(fromModality, toModality, trainOrVal)
     texts = textIdxSet[ {{ 1, endIdx }} ]:long()
 
     if fromModality == I then
-        queries = d.trainset[I]:index(1, images)
-        queryLabels = d.train_labels_image:float():index(1, images)
+        queries = d.trainset[I].data:index(1, images)
+        queryLabels = d.trainset[I].label:float():index(1, images)
     else
-        queries = d.trainset[X]:index(1, texts)
-        queryLabels = d.train_labels_text:float():index(1, texts)
+        queries = d.trainset[X].data:index(1, texts)
+        queryLabels = d.trainset[X].label:float():index(1, texts)
     end
 
     if toModality == I then
-        database = d.trainset[I]:index(1, images)
-        databaseLabels = d.train_labels_image:float():index(1, images)
+        database = d.trainset[I].data:index(1, images)
+        databaseLabels = d.trainset[I].label:float():index(1, images)
     else
-        database = d.trainset[X]:index(1, texts)
-        databaseLabels = d.train_labels_text:float():index(1, texts)
+        database = d.trainset[X].data:index(1, texts)
+        databaseLabels = d.trainset[X].label:float():index(1, texts)
     end
 
     queryCodes = getHashCodes(queries)
@@ -139,22 +139,23 @@ function getQueryAndDBCodes(fromModality, toModality, trainOrVal)
     return queryCodes, databaseCodes, queryLabels, databaseLabels
 end
 
+-- TODO: Incorporate pretrain set
 function getQueryAndDBCodesTest(fromModality, toModality)
 
     if fromModality == I then
-        queries = d.testset[I]
-        queryLabels = d.test_labels_image:float()
+        queries = d.testset[I].data
+        queryLabels = d.testset[I].label:float()
     else
-        queries = d.testset[X]
-        queryLabels = d.test_labels_text:float()
+        queries = d.testset[X].data
+        queryLabels = d.testset[X].label:float()
     end
 
     if toModality == I then
-        database = d.trainset[I]
-        databaseLabels = d.train_labels_image:float()
+        database = d.trainset[I].data
+        databaseLabels = d.trainset[I].label:float()
     else
-        database = d.trainset[X]
-        databaseLabels = d.train_labels_text:float()
+        database = d.trainset[X].data
+        databaseLabels = d.trainset[X].label:float()
     end
 
     queryCodes = getHashCodes(queries)

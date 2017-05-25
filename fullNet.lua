@@ -109,30 +109,54 @@ end
 
 function loadData() 
 
-  local imageRootPath = g.datasetPath .. 'ImageData/Flickr'
   local imageRootPath = g.datasetPath .. 'ImageData'
   d.dataset = imageLoader{path=imageRootPath, sampleSize={3,227,227}, splitFolders={'training', 'pretraining', 'val', 'query'}}
 
-  if not d.trainset then
-      d.trainset = {}
-      d.testset = {}
+  d.trainset = {}
+  d.trainset[I] = {}
+  d.trainset[X] = {}
+  d.valset = {}
+  d.valset[I] = {}
+  d.valset[X] = {}
+  d.testset = {}
+  d.testset[I] = {}
+  d.testset[X] = {}
 
-      local trainset, queryset, valset
-      if p.datasetType == 'mir' then
-        trainset, pretrainset, queryset, valset = getImageAndTextDataMirflickr()
-      elseif p.datasetType == 'nus' then
-        trainset, queryset, valset = getImageAndTextDataNuswide()
-      end
+  -- This will only be used in evaluating the trainset accuracy. Training will include pretraining
+  -- The entire trainset (including pretrain) is too larget to hold in memory
+  d.trainset[I].data, d.trainset[I].label = d.dataset:getBySplit('training', 'I', 1, d.dataset:sizeTrain())
+  d.trainset[X].data, d.trainset[X].label = d.dataset:getBySplit('training', 'X', 1, d.dataset:sizeTrain())
 
-      d.trainset[I] = trainset.data
-      d.testset[I] = queryset.data
-      d.train_labels_image = trainset.label
-      d.test_labels_image = queryset.label
-      d.trainset[X] = trainset.tags
-      d.testset[X] = queryset.tags
-      d.train_labels_text = trainset.label
-      d.test_labels_text = queryset.label
-  end
+  d.valset[I].data, d.valset[I].label = d.dataset:getBySplit('val', 'I', 1, d.dataset:sizeVal())
+  d.valset[X].data, d.valset[X].label = d.dataset:getBySplit('val', 'X', 1, d.dataset:sizeVal())
+
+  d.testset[I].data, d.testset[I].label = d.dataset:getBySplit('query', 'I', 1, d.dataset:sizeTest())
+  d.testset[X].data, d.testset[X].label = d.dataset:getBySplit('query', 'X', 1, d.dataset:sizeTest())
+
+  pairs = torch.load(g.datasetPath .. 'crossModalPairs.t7')
+  d.pos_pairs_full = pairs.pos_pairs
+  d.neg_pairs_full = pairs.neg_pairs
+
+  -- if not d.trainset then
+  --     d.trainset = {}
+  --     d.testset = {}
+
+  --     local trainset, queryset, valset
+  --     if p.datasetType == 'mir' then
+  --       trainset, pretrainset, queryset, valset = getImageAndTextDataMirflickr()
+  --     elseif p.datasetType == 'nus' then
+  --       trainset, queryset, valset = getImageAndTextDataNuswide()
+  --     end
+
+  --     d.trainset[I].data = trainset.data
+  --     d.testset[I].data = queryset.data
+  --     d.trainset[I].label = trainset.label
+  --     d.testset[I].label = queryset.label
+  --     d.trainset[X] = trainset.tags
+  --     d.testset[X].data = queryset.tags
+  --     d.trainset[X].label = trainset.label
+  --     d.testset[X].label = queryset.label
+  -- end
 
   -- if not d.pos_pairs_full then
   --     d.pos_pairs_full, d.neg_pairs_full, d.trainImages, d.trainTexts, d.valImages, d.valTexts, d.pos_pairs_image, d.neg_pairs_image, d.pos_pairs_text, d.neg_pairs_text = pickSubset(true)
@@ -141,6 +165,10 @@ function loadData()
 end -- end loadData()
 
 function loadTrainAndValSubsets(kNum)
+
+  pairs = torch.load(g.datasetPath .. 'crossModalPairs.t7')
+  d.pos_pairs_full = pairs.pos_pairs
+  d.neg_pairs_full = pairs.neg_pairs
 
   if not kNum then
       d.pos_pairs_full, d.neg_pairs_full, d.trainImages, d.trainTexts, d.valImages, d.valTexts, d.pos_pairs_image, d.neg_pairs_image, d.pos_pairs_text, d.neg_pairs_text = pickSubset(true)
@@ -483,13 +511,13 @@ function doOneEpochOnModality(modality, evalEpoch, logResults)
   return avgEpochLoss, crossModalEpochLoss
 end
 
-function runEverything(datasetType, iterationsPerEpoch, modelType, lrMultForHashLayer, kNum, modality, simWeight, balanceWeight, quantWeight)
+-- function runEverything(datasetType, iterationsPerEpoch, modelType, lrMultForHashLayer, kNum, modality, simWeight, balanceWeight, quantWeight)
+function runEverything(datasetType, iterationsPerEpoch, modelType, lrMultForHashLayer, modality, simWeight, balanceWeight, quantWeight)
 
   loadParamsAndPackages(datasetType, iterationsPerEpoch)
   loadFullModel(modelType, lrMultForHashLayer)
   loadData()
-  loadTrainAndValSubsets(kNum)
+  -- loadTrainAndValSubsets(kNum)
   getOptimStateAndShareParameters(modality)
   doGetCriterion(simWeight, balanceWeight, quantWeight)
-
 end

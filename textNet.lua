@@ -126,7 +126,7 @@ function trainAndEvaluate(batchSize, learningRate, momentum, weightDecay, numEpo
     -- criterion = nn.MultiLabelSoftMarginCriterion()
     -- criterion = nn.MSECriterion()
     criterion = nn.BCECriterion()
-    -- criterion.sizeAverage = false -- TODO: This is not in image network!
+    criterion.sizeAverage = false -- TODO: This is not in image network!
 
     criterion = criterion:cuda()
     m.textClassifier:cuda()
@@ -181,10 +181,10 @@ function trainAndEvaluate(batchSize, learningRate, momentum, weightDecay, numEpo
                 local dloss_doutputs = criterion:backward(outputs, trainBatch.label)
                 m.textClassifier:backward(trainBatch.data, dloss_doutputs)
 
-                -- TODO: This is not in image network!!!
-                -- local inputSize = trainBatch.data:size(1)
-                -- gradParams:div(inputSize)
-                -- loss = loss/inputSize
+                --TODO: This is not in image network!!!
+                local inputSize = trainBatch.data:size(1)
+                gradParams:div(inputSize)
+                loss = loss/inputSize
 
                 return loss, gradParams
             end

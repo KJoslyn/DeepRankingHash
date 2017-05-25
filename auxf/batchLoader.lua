@@ -23,20 +23,20 @@ function getBatch(pos_pairs, neg_pairs, modality)
     batch.label = {}
 
     if modality == 'C' then -- Cross Modal (Both modalities)
-        batch.data[I] = d.trainset[I]:index(1, batchIdxInTrainset:select(2,1)) -- TODO: Fix long conversion in root pos_pairs and neg_pairs
-        batch.data[X] = d.trainset[X]:index(1, batchIdxInTrainset:select(2,2))
-        batch.label[I] = d.train_labels_image:index(1, batchIdxInTrainset:select(2,1))
-        batch.label[X] = d.train_labels_text:index(1, batchIdxInTrainset:select(2,2))
+        batch.data[I] = d.trainset[I].data:index(1, batchIdxInTrainset:select(2,1)) -- TODO: Fix long conversion in root pos_pairs and neg_pairs
+        batch.data[X] = d.trainset[X].data:index(1, batchIdxInTrainset:select(2,2))
+        batch.label[I] = d.trainset[I].label:index(1, batchIdxInTrainset:select(2,1))
+        batch.label[X] = d.trainset[X].label:index(1, batchIdxInTrainset:select(2,2))
     elseif modality == 'I' then -- Image intramodal
-        batch.data[1] = d.trainset[I]:index(1, batchIdxInTrainset:select(2,1))
-        batch.data[2] = d.trainset[I]:index(1, batchIdxInTrainset:select(2,2))
-        batch.label[1] = d.train_labels_image:index(1, batchIdxInTrainset:select(2,1))
-        batch.label[2] = d.train_labels_image:index(1, batchIdxInTrainset:select(2,2))
+        batch.data[1] = d.trainset[I].data:index(1, batchIdxInTrainset:select(2,1))
+        batch.data[2] = d.trainset[I].data:index(1, batchIdxInTrainset:select(2,2))
+        batch.label[1] = d.trainset[I].label:index(1, batchIdxInTrainset:select(2,1))
+        batch.label[2] = d.trainset[I].label:index(1, batchIdxInTrainset:select(2,2))
     elseif modality == 'X' then -- Text intramodal
-        batch.data[1] = d.trainset[X]:index(1, batchIdxInTrainset:select(2,1))
-        batch.data[2] = d.trainset[X]:index(1, batchIdxInTrainset:select(2,2))
-        batch.label[1] = d.train_labels_text:index(1, batchIdxInTrainset:select(2,1))
-        batch.label[2] = d.train_labels_text:index(1, batchIdxInTrainset:select(2,2))
+        batch.data[1] = d.trainset[X].data:index(1, batchIdxInTrainset:select(2,1))
+        batch.data[2] = d.trainset[X].data:index(1, batchIdxInTrainset:select(2,2))
+        batch.label[1] = d.trainset[X].label:index(1, batchIdxInTrainset:select(2,1))
+        batch.label[2] = d.trainset[X].label:index(1, batchIdxInTrainset:select(2,2))
     else
         print("Error: unrecognized modality in getBatch")
     end

@@ -60,6 +60,24 @@ function getHashLayerGrouped(prevLayerSize, L, k, lrMultForHashLayer, addHiddenL
     return hashLayer
 end
 
+function getImageModelImageNetPretrained(lrMultForLastLayer)
+    -- Uses pre-trained model from https://github.com/BVLC/caffe/tree/master/models/bvlc_alexnet
+
+    local model = nn.Sequential()
+
+    local imDir = '/home/kjoslyn/kevin/Project/IMAGENET/'
+    local model = loadcaffe.load(imDir .. 'deploy.prototxt', imDir .. 'bvlc_alexnet.caffemodel', 'cudnn')
+    model.modules[24] = nil
+    model.modules[23] = nil
+    model:add(nn.Linear(4096, p.numClasses)
+            :init('weight', nninit.xavier, {dist = 'normal', gain = 'sigmoid'})
+            :learningRate('weight', lrMultForLastLayer))
+
+    model:add(nn.Sigmoid())
+
+    return model
+end
+
 function getImageModel()
 
     -- local model = loadcaffe.load(g.filePath .. 'CNN Model/trainnet.prototxt', g.filePath .. 'CNN Model/snapshot_iter_16000.caffemodel', 'cudnn')
@@ -116,6 +134,9 @@ function getUntrainedTextModel()
     model:add(nn.Linear(p.tagDim, 2048):init('weight', nninit.xavier, {dist = 'normal', gain = 'relu'}))
     model:add(cudnn.ReLU(true))
     model:add(nn.Dropout(0.500000))
+    -- model:add(nn.Linear(2048, 2048):init('weight', nninit.xavier, {dist = 'normal', gain = 'relu'}))
+    -- model:add(cudnn.ReLU(true))
+    -- model:add(nn.Dropout(0.500000))
     model:add(nn.Linear(2048, p.numClasses):init('weight', nninit.xavier, {dist = 'normal', gain = 'sigmoid'}))
 
     model:add(nn.Sigmoid())

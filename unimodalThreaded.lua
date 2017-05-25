@@ -1,3 +1,4 @@
+
 -- //////////////////////////////////////////
 -- Typical flow:
 -- require 'unimodal'
@@ -6,6 +7,8 @@
 -- optional: loadModelSnapshot -- from createModel.lua
 -- trainAndEvaluate()
 -- /////////////////////////////////////////
+local threads = require 'threads'
+threads.Threads.serialization('threads.sharedserialize')
 
 function loadPackagesAndModel(datasetType, modality)
 
@@ -20,10 +23,6 @@ function loadPackagesAndModel(datasetType, modality)
     require 'cutorch'
     require 'cunn'
     require 'cudnn'
-
-    require 'inn'
-    require 'nnlr'
-    loadcaffe = require 'loadcaffe'
 
     p = {} -- parameters
     d = {} -- data
@@ -58,8 +57,7 @@ function loadPackagesAndModel(datasetType, modality)
 
     -- //////////// Load image / text model
     if modality == 'I' then
-    --    m.classifier = getImageModel()
-       m.classifier = getImageModelImageNetPretrained(1e3)
+       m.classifier = getImageModel()
        m.imageClassifier = m.classifier
        g.evalTrainAccEpochs = 1
     elseif modality == 'X' then
@@ -140,29 +138,31 @@ function loadData(small)
     Ntest = d.dataset:sizeTest()
     Nval = d.dataset:sizeVal()
 
-    d.trainset = {}
-    d.valset = {}
-    d.testset = {}
-    if p.modality == 'X' then
-        -- This will actually be used in training, and in evaluating the trainset accuracy
-        if not small then
-            d.trainset.data, d.trainset.label = d.dataset:getBySplit({'training', 'pretraining'}, 'X', 1, Ntrain)
-        else
-            Ntrain = d.dataset:sizeTrain()
-            d.trainset.data, d.trainset.label = d.dataset:getBySplit({'training'}, 'X', 1, Ntrain)
-        end
-    else
-        -- This will only be used in evaluating the trainset accuracy. Training will include pretraining
-        -- The entire trainset (including pretrain) is too larget to hold in memory
-        d.trainset.data, d.trainset.label = d.dataset:getBySplit('training', 'I', 1, d.dataset:sizeTrain())
-    end
-    d.valset.data, d.valset.label = d.dataset:getBySplit('val', p.modality, 1, Nval)
-    d.testset.data, d.testset.label = d.dataset:getBySplit('query', p.modality, 1, Ntest)
+    -- d.trainset = {}
+    -- d.valset = {}
+    -- d.testset = {}
+    -- if p.modality == 'X' then
+    --     -- This will actually be used in training, and in evaluating the trainset accuracy
+    --     if not small then
+    --         d.trainset.data, d.trainset.label = d.dataset:getBySplit({'training', 'pretraining'}, 'X', 1, Ntrain)
+    --     else
+    --         Ntrain = d.dataset:sizeTrain()
+    --         d.trainset.data, d.trainset.label = d.dataset:getBySplit({'training'}, 'X', 1, Ntrain)
+    --     end
+    -- else
+    --     -- This will only be used in evaluating the trainset accuracy. Training will include pretraining
+    --     -- The entire trainset (including pretrain) is too larget to hold in memory
+    --     d.trainset.data, d.trainset.label = d.dataset:getBySplit('training', 'I', 1, d.dataset:sizeTrain())
+    -- end
+    -- d.valset.data, d.valset.label = d.dataset:getBySplit('val', p.modality, 1, Nval)
+    -- d.testset.data, d.testset.label = d.dataset:getBySplit('query', p.modality, 1, Ntest)
 
     collectgarbage()
 end
 
 function trainAndEvaluate(batchSize, learningRate, momentum, weightDecay, numEpochs, printTrainsetAcc)
+
+    local trainPool = threads.Threads(nThreads)
 
     local startEpoch = g.numEpochsCompleted + 1
 
@@ -178,7 +178,7 @@ function trainAndEvaluate(batchSize, learningRate, momentum, weightDecay, numEpo
     criterion = criterion:cuda()
     m.classifier:cuda()
 
-    params, gradParams = m.classifier:getParameters()
+    local params, gradParams = m.classifier:getParameters()
 
     local optimState = {
         learningRate = learningRate, -- .01 works for mirflickr
@@ -189,6 +189,8 @@ function trainAndEvaluate(batchSize, learningRate, momentum, weightDecay, numEpo
         momentum = momentum -- 0.9?
     }
 
+    local batchSize = batchSize
+    local Ntrainloc = Ntrain
     numBatches = math.ceil(Ntrain / batchSize)
 
     m.classifier:training()
@@ -200,16 +202,23 @@ function trainAndEvaluate(batchSize, learningRate, momentum, weightDecay, numEpo
         epochTimer:reset()
         epochTimer:resume()
         -- shuffle at each epoch
-        perm = torch.randperm(Ntrain):long()
+        -- local perm = torch.randperm(Ntrain):long()
+        local perm = nil
         totalLoss = 0
         totNumIncorrect = 0
 
+        local trainBatch, bufferedBatch, batchNum
         for batchNum = 0, numBatches - 1 do
 
-            trainBatch = getBatch(batchNum, batchSize, perm)
-            collectgarbage()
+            if bufferedBatch then
+                trainBatch = bufferedBatch
+            else
+                print('Getting first batch, bnum = ' .. batchNum .. ', batchSize = ' .. batchSize)
+                trainBatch = getBatch(batchNum, batchSize, perm)
+                print('Done getting first batch')
+            end
 
-            function feval(x)
+            local function feval(x)
                 -- get new parameters
                 if x ~= params then
                     params:copy(x)
@@ -235,7 +244,19 @@ function trainAndEvaluate(batchSize, learningRate, momentum, weightDecay, numEpo
 
                 return loss, gradParams
             end
-            optim.sgd(feval, params, optimState)
+
+            trainPool:addjob(function()
+                optim.sgd(feval, params, optimState)
+            end)
+
+            if batchNum < numBatches - 1 then
+                bufferedBatch = getBatch(batchNum + 1, batchSize, perm)
+            end
+
+            trainPool:synchronize()
+
+            collectgarbage()
+            -- optim.sgd(feval, params, optimState)
 
             -- collectgarbage()
         end
@@ -248,14 +269,14 @@ function trainAndEvaluate(batchSize, learningRate, momentum, weightDecay, numEpo
         avgNumIncorrect = totNumIncorrect / Ntrain
         print("Epoch " .. epoch .. ": avg num incorrect = " .. avgNumIncorrect)
         local valClassAcc
-        if d.valset then
-            valClassAcc = getClassAccuracy(d.valset.data, d.valset.label:cuda())
-            print(string.format("Epoch %d: Val set class accuracy = %.2f", epoch, valClassAcc))
-        end
-        if d.trainset and epoch % g.evalTrainAccEpochs == 0 then
-            local trainClassAcc = getClassAccuracy(d.trainset.data, d.trainset.label:cuda())
-            print(string.format("Epoch %d: Train set class accuracy = %.2f", epoch, trainClassAcc))
-        end
+        -- if d.valset then
+        --     valClassAcc = getClassAccuracy(d.valset.data, d.valset.label:cuda())
+        --     print(string.format("Epoch %d: Val set class accuracy = %.2f", epoch, valClassAcc))
+        -- end
+        -- if d.trainset and epoch % g.evalTrainAccEpochs == 0 then
+        --     local trainClassAcc = getClassAccuracy(d.trainset.data, d.trainset.label:cuda())
+        --     print(string.format("Epoch %d: Train set class accuracy = %.2f", epoch, trainClassAcc))
+        -- end
         print(string.format('Epoch time: %.2f seconds\n', epochTimer:time().real))
         m.classifier:training()
 
@@ -300,4 +321,5 @@ function trainAndEvaluate(batchSize, learningRate, momentum, weightDecay, numEpo
 
         g.numEpochsCompleted = g.numEpochsCompleted + 1
     end
+    trainPool:terminate()
 end
