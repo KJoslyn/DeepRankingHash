@@ -75,6 +75,8 @@ function getImageModelImageNetPretrained(lrMultForLastLayer)
 
     model:add(nn.Sigmoid())
 
+    model = model:cuda()
+
     return model
 end
 

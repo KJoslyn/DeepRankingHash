@@ -7,7 +7,55 @@
 -- trainAndEvaluate()
 -- /////////////////////////////////////////
 
-function loadPackagesAndModel(datasetType, modality)
+local function doSetLRForLayer(layerIdx, newLRMult)
+    m.classifier:get(layerIdx):learningRate('weight', newLRMult)
+    m.classifier:get(layerIdx):learningRate('bias', newLRMult)
+end
+
+local function doSetWDForLayer(layerIdx, newWDMult)
+    m.classifier:get(layerIdx):weightDecay('weight', newWDMult)
+    m.classifier:get(layerIdx):weightDecay('bias', newWDMult)
+end
+
+local function doChangeLRAndWDForLayer(layerName, newLR, newWD)
+
+    local newLRMult = newLR / p.baseLearningRate
+    local newWDMult
+    if p.baseWeightDecay == 0 then
+        newWDMult = 1
+    else
+        newWDMult = newWD / p.baseWeightDecay
+    end
+
+    if layerName == 'feature' then
+        print('Changing feature learning rate not yet implemented')
+    elseif layerName == 'top' then
+        p.topLearningRate = newLR
+        doSetLRForLayer(17, newLRMult)
+        doSetLRForLayer(20, newLRMult)
+        doSetWDForLayer(17, newWDMult)
+        doSetWDForLayer(20, newWDMult)
+    elseif layerName == 'last' then
+        p.lastLayerLearningRate = newLR
+        doSetLRForLayer(23, newLRMult)
+        doSetWDForLayer(23, newWDMult)
+    end
+
+    -- This still needs a call to setOptimStateLRAndWD to be complete
+end
+
+local function setOptimStateLRAndWD(newLR, newWD)
+    local learningRates, weightDecays = m.classifier:getOptimConfig(p.baseLearningRate, p.baseWeightDecay)
+    g.optimState.learningRates = learningRates
+    g.optimState.weightDecays = weightDecays
+end
+
+function changeLRAndWDForLayer(layerName, newLR, newWD)
+    doChangeLRAndWDForLayer(layerName, newLR, newWD)
+    setOptimStateLRAndWD(p.baseLearningRate, p.baseWeightDecay)
+end
+
+function loadPackagesAndModel(datasetType, modality, baseLearningRate, baseWeightDecay)
 
     require 'nn'
     require 'optim'
@@ -51,6 +99,7 @@ function loadPackagesAndModel(datasetType, modality)
     end
     p.datasetType = datasetType
     p.modality = modality
+    p.batchSize = 100
 
     g.snapshotDir = '/home/kjoslyn/kevin/Project/snapshots' .. snapshotDatasetDir
 
@@ -61,7 +110,11 @@ function loadPackagesAndModel(datasetType, modality)
     --    m.classifier = getImageModel()
        m.classifier = getImageModelImageNetPretrained(1e3)
        m.imageClassifier = m.classifier
-       g.evalTrainAccEpochs = 1
+       if datasetType == 'nus' then
+          g.evalTrainAccEpochs = 1
+       else
+          g.evalTrainAccEpochs = 5
+       end
     elseif modality == 'X' then
        m.classifier = getUntrainedTextModel()
        m.textClassifier = m.classifier
@@ -79,28 +132,47 @@ function loadPackagesAndModel(datasetType, modality)
     g.avgDataLoss = torch.Tensor()
     g.maxDataLoss = torch.Tensor()
     g.minDataLoss = torch.Tensor()
+
+    -- TODO: Fix image-text disparity
+    p.baseLearningRate = baseLearningRate or 1e-4
+    p.topLearningRate = 0.01
+    p.lastLayerLearningRate = 0.1
+
+    p.baseWeightDecay = baseWeightDecay or 0 -- 1e-4
+    p.topWeightDecay =  1 -- .01
+    p.lastLayerWeightDecay =  1 -- .02
+
+    p.baseLearningRateDecay = 0
+    p.baseMomentum = 0.9
+
+    g.optimState = {
+        learningRate = p.baseLearningRate,
+        learningRateDecay = p.baseLearningRateDecay,
+        momentum = p.baseMomentum
+    }
+
+    if p.modality == 'I' then
+        doChangeLRAndWDForLayer('top', p.topLearningRate, p.topWeightDecay)
+        doChangeLRAndWDForLayer('last', p.lastLayerLearningRate, p.lastLayerWeightDecay)
+    end
+    setOptimStateLRAndWD(p.baseLearningRate, p.baseWeightDecay)
 end
 
-function doGetBatchText(startIndex, endIndex, perm)
+function doGetBatchFromMemory(startIndex, endIndex, perm)
 
     local batchPerm = perm[ {{ startIndex, endIndex }} ]
     local batch = {}
     batch.data = d.trainset.data:index(1, batchPerm)
     batch.label = d.trainset.label:index(1, batchPerm)
-    batch.data = batch.data:cuda()
-    batch.label = batch.label:cuda()
 
     return batch
 end
 
-function doGetBatchImage(startIndex, endIndex, perm)
+function doGetBatchImageFromDataset(startIndex, endIndex, perm)
 
     local batch = {}
-    -- TODO: Uncomment!!
-    -- batch.data, batch.label = d.dataset:getBySplit({'training', 'pretraining'}, 'I', startIndex, endIndex, perm)
-    batch.data, batch.label = d.dataset:getBySplit({'training'}, 'I', startIndex, endIndex, perm)
-    batch.data = batch.data:cuda()
-    batch.label = batch.label:cuda()
+    batch.data, batch.label = d.dataset:getBySplit({'training', 'pretraining'}, 'I', startIndex, endIndex, perm)
+    -- batch.data, batch.label = d.dataset:getBySplit({'training'}, 'I', startIndex, endIndex, perm)
 
     return batch
 end
@@ -111,11 +183,14 @@ function getBatch(batchNum, batchSize, perm)
     local endIndex = math.min((batchNum + 1) * batchSize, Ntrain)
 
     local batch
-    if p.modality == 'I' then
-        batch = doGetBatchImage(startIndex, endIndex, perm)
+    if p.modality == 'I' and p.datasetType == 'nus' then
+        batch = doGetBatchImageFromDataset(startIndex, endIndex, perm)
     else
-        batch = doGetBatchText(startIndex, endIndex, perm)
+        batch = doGetBatchFromMemory(startIndex, endIndex, perm)
     end
+
+    batch.data = batch.data:cuda()
+    batch.label = batch.label:cuda()
 
     setmetatable(batch, 
         {__index = function(t, i) 
@@ -135,8 +210,8 @@ function loadData(small)
     local imageRootPath = g.datasetPath .. 'ImageData'
     d.dataset = imageLoader{path=imageRootPath, sampleSize={3,227,227}, splitFolders={'training', 'pretraining', 'val', 'query'}}
 
-    -- Ntrain = d.dataset:sizeTrain() + d.dataset:sizePretraining()
-    Ntrain = d.dataset:sizeTrain()
+    Ntrain = d.dataset:sizeTrain() + d.dataset:sizePretraining()
+    -- Ntrain = d.dataset:sizeTrain()
     Ntest = d.dataset:sizeTest()
     Nval = d.dataset:sizeVal()
 
@@ -152,9 +227,13 @@ function loadData(small)
             d.trainset.data, d.trainset.label = d.dataset:getBySplit({'training'}, 'X', 1, Ntrain)
         end
     else
-        -- This will only be used in evaluating the trainset accuracy. Training will include pretraining
-        -- The entire trainset (including pretrain) is too larget to hold in memory
-        d.trainset.data, d.trainset.label = d.dataset:getBySplit('training', 'I', 1, d.dataset:sizeTrain())
+        if p.datasetType == 'nus' then
+            -- This will only be used in evaluating the trainset accuracy. Training will include pretraining
+            -- The entire trainset (including pretrain) is too larget to hold in memory
+            d.trainset.data, d.trainset.label = d.dataset:getBySplit('training', 'I', 1, d.dataset:sizeTrain())
+        else
+            d.trainset.data, d.trainset.label = d.dataset:getBySplit({'training', 'pretraining'}, 'I', 1, Ntrain)
+        end
     end
     d.valset.data, d.valset.label = d.dataset:getBySplit('val', p.modality, 1, Nval)
     d.testset.data, d.testset.label = d.dataset:getBySplit('query', p.modality, 1, Ntest)
@@ -162,7 +241,20 @@ function loadData(small)
     collectgarbage()
 end
 
-function trainAndEvaluate(batchSize, learningRate, momentum, weightDecay, numEpochs, printTrainsetAcc)
+function trainAndEvaluate(numEpochs, batchSize, lr, mom, wd)
+
+    local batchSize = batchSize or p.batchSize
+
+    -- lr and wd parameters should only be used when not setting different learning rates for different layers
+    -- (i.e. image modality)
+    if lr or wd then
+        local lr = lr or p.baseLearningRate
+        local wd = wd or p.baseWeightDecay
+        setOptimStateLRAndWD(lr, wd)
+    end
+    if mom then
+        g.optimState.momentum = mom
+    end
 
     local startEpoch = g.numEpochsCompleted + 1
 
@@ -174,20 +266,20 @@ function trainAndEvaluate(batchSize, learningRate, momentum, weightDecay, numEpo
     -- criterion = nn.MSECriterion()
     criterion = nn.BCECriterion()
     criterion.sizeAverage = false -- TODO: This is not in image network!
-
     criterion = criterion:cuda()
-    m.classifier:cuda()
 
-    params, gradParams = m.classifier:getParameters()
+    local params, gradParams = m.classifier:getParameters()
 
-    local optimState = {
-        learningRate = learningRate, -- .01 works for mirflickr
-        -- learningRateDecay = 1e-7
-        -- learningRate = 1e-3,
-        -- learningRateDecay = 1e-4,
-        weightDecay = weightDecay, -- .01?
-        momentum = momentum -- 0.9?
-    }
+    -- g.optimState.learningRate = learningRate
+
+    -- local optimState = {
+    --     learningRate = learningRate, -- .01 works for mirflickr
+    --     -- learningRateDecay = 1e-7
+    --     -- learningRate = 1e-3,
+    --     -- learningRateDecay = 1e-4,
+    --     weightDecay = weightDecay, -- .01?
+    --     momentum = momentum -- 0.9?
+    -- }
 
     numBatches = math.ceil(Ntrain / batchSize)
 
@@ -235,7 +327,7 @@ function trainAndEvaluate(batchSize, learningRate, momentum, weightDecay, numEpo
 
                 return loss, gradParams
             end
-            optim.sgd(feval, params, optimState)
+            optim.sgd(feval, params, g.optimState)
 
             -- collectgarbage()
         end

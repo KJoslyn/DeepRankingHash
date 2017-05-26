@@ -1,4 +1,3 @@
-
 -- //////////////////////////////////////////
 -- Typical flow:
 -- require 'unimodal'
@@ -7,8 +6,6 @@
 -- optional: loadModelSnapshot -- from createModel.lua
 -- trainAndEvaluate()
 -- /////////////////////////////////////////
-local threads = require 'threads'
-threads.Threads.serialization('threads.sharedserialize')
 
 function loadPackagesAndModel(datasetType, modality)
 
@@ -23,6 +20,10 @@ function loadPackagesAndModel(datasetType, modality)
     require 'cutorch'
     require 'cunn'
     require 'cudnn'
+
+    require 'inn'
+    require 'nnlr'
+    loadcaffe = require 'loadcaffe'
 
     p = {} -- parameters
     d = {} -- data
@@ -57,7 +58,8 @@ function loadPackagesAndModel(datasetType, modality)
 
     -- //////////// Load image / text model
     if modality == 'I' then
-       m.classifier = getImageModel()
+    --    m.classifier = getImageModel()
+       m.classifier = getImageModelImageNetPretrained(1e3)
        m.imageClassifier = m.classifier
        g.evalTrainAccEpochs = 1
     elseif modality == 'X' then
@@ -77,6 +79,51 @@ function loadPackagesAndModel(datasetType, modality)
     g.avgDataLoss = torch.Tensor()
     g.maxDataLoss = torch.Tensor()
     g.minDataLoss = torch.Tensor()
+
+    -- TODO: Fix image-text disparity
+    p.baseLearningRate = 1e-4
+    p.topLearningRate = 0.01
+    p.lastLayerLearningRate = 0.1
+
+    p.baseLearningRateDecay = 0
+    p.baseWeightDecay = 0
+    p.baseMomentum = 0.9
+
+    g.optimState = {
+        learningRate = p.baseLearningRate,
+        learningRateDecay = p.baseLearningRateDecay,
+        momentum = p.baseMomentum
+    }
+
+    if p.modality == 'I' then
+        changeLearningRateForLayer('top', p.topLearningRate)
+        changeLearningRateForLayer('last', p.lastLayerLearningRate)
+    end
+end
+
+function doSetLRForLayer(layerIdx, newLRMult)
+    m.classifier:get(layerIdx):learningRate('weight', newLRMult)
+    m.classifier:get(layerIdx):learningRate('bias', newLRMult)
+end
+
+function changeLearningRateForLayer(layerName, newLR)
+
+    local newLRMult = newLR / p.baseLearningRate
+
+    if layerName == 'feature' then
+        print('Changing feature learning rate not yet implemented')
+    elseif layerName == 'top' then
+        p.topLearningRate = newLR
+        doSetLRForLayer(17, newLRMult)
+        doSetLRForLayer(20, newLRMult)
+    elseif layerName == 'last' then
+        p.lastLayerLearningRate = newLR
+        doSetLRForLayer(23, newLRMult)
+    end
+
+    local learningRates, weightDecays = m.classifier:getOptimConfig(p.baseLearningRate, p.baseWeightDecay)
+    g.optimState.learningRates = learningRates
+    g.optimState.weightDecays = weightDecays
 end
 
 function doGetBatchText(startIndex, endIndex, perm)
@@ -103,6 +150,30 @@ function doGetBatchImage(startIndex, endIndex, perm)
     return batch
 end
 
+function getBatchIndices(batchNum, batchSize, perm)
+
+    local startIndex = batchNum * batchSize + 1
+    local endIndex = math.min((batchNum + 1) * batchSize, Ntrain)
+
+    return startIndex, endIndex
+end
+
+function getBufferedBatchImage()
+
+    local batch = {}
+    batch.data, batch.label = d.dataset:getBufferedBatch()
+    batch.data = batch.data:cuda()
+    batch.label = batch.label:cuda()
+
+    return batch
+end
+
+function loadBatchAsyncImage(batchNum, batchSize, perm)
+
+    local startIndex, endIndex = getBatchIndices(batchNum, batchSize, perm)
+    d.dataset:loadImageBatchBySplitAsync({'training'}, 'I', startIndex, endIndex, perm) -- TODO!!!!
+end
+
 function getBatch(batchNum, batchSize, perm)
 
     local startIndex = batchNum * batchSize + 1
@@ -115,15 +186,15 @@ function getBatch(batchNum, batchSize, perm)
         batch = doGetBatchText(startIndex, endIndex, perm)
     end
 
-    setmetatable(batch, 
-        {__index = function(t, i) 
-                        return {t.data[i], t.label[i]} 
-                    end}
-    );
+    -- setmetatable(batch, 
+    --     {__index = function(t, i) 
+    --                     return {t.data[i], t.label[i]} 
+    --                 end}
+    -- );
 
-    function batch:size() 
-        return self.data:size(1) 
-    end
+    -- function batch:size() 
+    --     return self.data:size(1) 
+    -- end
 
     return batch
 end
@@ -138,31 +209,33 @@ function loadData(small)
     Ntest = d.dataset:sizeTest()
     Nval = d.dataset:sizeVal()
 
-    -- d.trainset = {}
-    -- d.valset = {}
-    -- d.testset = {}
-    -- if p.modality == 'X' then
-    --     -- This will actually be used in training, and in evaluating the trainset accuracy
-    --     if not small then
-    --         d.trainset.data, d.trainset.label = d.dataset:getBySplit({'training', 'pretraining'}, 'X', 1, Ntrain)
-    --     else
-    --         Ntrain = d.dataset:sizeTrain()
-    --         d.trainset.data, d.trainset.label = d.dataset:getBySplit({'training'}, 'X', 1, Ntrain)
-    --     end
-    -- else
-    --     -- This will only be used in evaluating the trainset accuracy. Training will include pretraining
-    --     -- The entire trainset (including pretrain) is too larget to hold in memory
-    --     d.trainset.data, d.trainset.label = d.dataset:getBySplit('training', 'I', 1, d.dataset:sizeTrain())
-    -- end
-    -- d.valset.data, d.valset.label = d.dataset:getBySplit('val', p.modality, 1, Nval)
-    -- d.testset.data, d.testset.label = d.dataset:getBySplit('query', p.modality, 1, Ntest)
+    d.trainset = {}
+    d.valset = {}
+    d.testset = {}
+    if p.modality == 'X' then
+        -- This will actually be used in training, and in evaluating the trainset accuracy
+        if not small then
+            d.trainset.data, d.trainset.label = d.dataset:getBySplit({'training', 'pretraining'}, 'X', 1, Ntrain)
+        else
+            Ntrain = d.dataset:sizeTrain()
+            d.trainset.data, d.trainset.label = d.dataset:getBySplit({'training'}, 'X', 1, Ntrain)
+        end
+    else
+        -- This will only be used in evaluating the trainset accuracy. Training will include pretraining
+        -- The entire trainset (including pretrain) is too larget to hold in memory
+        d.trainset.data, d.trainset.label = d.dataset:getBySplit('training', 'I', 1, d.dataset:sizeTrain())
+    end
+    d.valset.data, d.valset.label = d.dataset:getBySplit('val', p.modality, 1, Nval)
+    d.testset.data, d.testset.label = d.dataset:getBySplit('query', p.modality, 1, Ntest)
 
     collectgarbage()
 end
 
-function trainAndEvaluate(batchSize, learningRate, momentum, weightDecay, numEpochs, printTrainsetAcc)
+local function getBatchChecksum(batch)
+    return batch.data[{ {}, {1}, {1}, {1} }]:sum()
+end
 
-    local trainPool = threads.Threads(nThreads)
+function trainAndEvaluate(batchSize, learningRate, momentum, weightDecay, numEpochs, printTrainsetAcc)
 
     local startEpoch = g.numEpochsCompleted + 1
 
@@ -176,21 +249,22 @@ function trainAndEvaluate(batchSize, learningRate, momentum, weightDecay, numEpo
     criterion.sizeAverage = false -- TODO: This is not in image network!
 
     criterion = criterion:cuda()
-    m.classifier:cuda()
 
     local params, gradParams = m.classifier:getParameters()
 
-    local optimState = {
-        learningRate = learningRate, -- .01 works for mirflickr
-        -- learningRateDecay = 1e-7
-        -- learningRate = 1e-3,
-        -- learningRateDecay = 1e-4,
-        weightDecay = weightDecay, -- .01?
-        momentum = momentum -- 0.9?
-    }
+    g.optimState.momentum = momentum
 
-    local batchSize = batchSize
-    local Ntrainloc = Ntrain
+    -- g.optimState.learningRate = learningRate
+
+    -- local optimState = {
+    --     learningRate = learningRate, -- .01 works for mirflickr
+    --     -- learningRateDecay = 1e-7
+    --     -- learningRate = 1e-3,
+    --     -- learningRateDecay = 1e-4,
+    --     weightDecay = weightDecay, -- .01?
+    --     momentum = momentum -- 0.9?
+    -- }
+
     numBatches = math.ceil(Ntrain / batchSize)
 
     m.classifier:training()
@@ -202,23 +276,26 @@ function trainAndEvaluate(batchSize, learningRate, momentum, weightDecay, numEpo
         epochTimer:reset()
         epochTimer:resume()
         -- shuffle at each epoch
-        -- local perm = torch.randperm(Ntrain):long()
-        local perm = nil
+        perm = torch.randperm(Ntrain):long()
         totalLoss = 0
         totNumIncorrect = 0
 
-        local trainBatch, bufferedBatch, batchNum
+        loadBatchAsyncImage(0, batchSize, perm)
+
         for batchNum = 0, numBatches - 1 do
 
-            if bufferedBatch then
-                trainBatch = bufferedBatch
-            else
-                print('Getting first batch, bnum = ' .. batchNum .. ', batchSize = ' .. batchSize)
-                trainBatch = getBatch(batchNum, batchSize, perm)
-                print('Done getting first batch')
+            -- trainBatch = getBatch(batchNum, batchSize, perm)
+            trainBatch = getBufferedBatchImage()
+            -- checksum1 = getBatchChecksum(trainBatch)
+            -- print('checksum1: ' .. checksum1)
+
+            if batchNum < numBatches - 1 then
+                loadBatchAsyncImage(batchNum + 1, batchSize, perm)
             end
 
-            local function feval(x)
+            collectgarbage()
+
+            function feval(x)
                 -- get new parameters
                 if x ~= params then
                     params:copy(x)
@@ -242,21 +319,17 @@ function trainAndEvaluate(batchSize, learningRate, momentum, weightDecay, numEpo
                 loss = loss/inputSize
                 totalLoss = totalLoss + loss
 
+                -- local checksum2 = getBatchChecksum(trainBatch)
+                -- assert(checksum1 == checksum2, "Checksums not equal!")
+
                 return loss, gradParams
             end
-
-            trainPool:addjob(function()
-                optim.sgd(feval, params, optimState)
-            end)
-
-            if batchNum < numBatches - 1 then
-                bufferedBatch = getBatch(batchNum + 1, batchSize, perm)
-            end
-
-            trainPool:synchronize()
-
-            collectgarbage()
-            -- optim.sgd(feval, params, optimState)
+            timer = torch.Timer()
+            timer:reset()
+            timer:resume()
+            optim.sgd(feval, params, g.optimState)
+            timer:stop()
+            print(string.format('sgd time: %.2f seconds\n', timer:time().real))
 
             -- collectgarbage()
         end
@@ -269,14 +342,14 @@ function trainAndEvaluate(batchSize, learningRate, momentum, weightDecay, numEpo
         avgNumIncorrect = totNumIncorrect / Ntrain
         print("Epoch " .. epoch .. ": avg num incorrect = " .. avgNumIncorrect)
         local valClassAcc
-        -- if d.valset then
-        --     valClassAcc = getClassAccuracy(d.valset.data, d.valset.label:cuda())
-        --     print(string.format("Epoch %d: Val set class accuracy = %.2f", epoch, valClassAcc))
-        -- end
-        -- if d.trainset and epoch % g.evalTrainAccEpochs == 0 then
-        --     local trainClassAcc = getClassAccuracy(d.trainset.data, d.trainset.label:cuda())
-        --     print(string.format("Epoch %d: Train set class accuracy = %.2f", epoch, trainClassAcc))
-        -- end
+        if d.valset then
+            valClassAcc = getClassAccuracy(d.valset.data, d.valset.label:cuda())
+            print(string.format("Epoch %d: Val set class accuracy = %.2f", epoch, valClassAcc))
+        end
+        if d.trainset and epoch % g.evalTrainAccEpochs == 0 then
+            local trainClassAcc = getClassAccuracy(d.trainset.data, d.trainset.label:cuda())
+            print(string.format("Epoch %d: Train set class accuracy = %.2f", epoch, trainClassAcc))
+        end
         print(string.format('Epoch time: %.2f seconds\n', epochTimer:time().real))
         m.classifier:training()
 
@@ -321,5 +394,60 @@ function trainAndEvaluate(batchSize, learningRate, momentum, weightDecay, numEpo
 
         g.numEpochsCompleted = g.numEpochsCompleted + 1
     end
-    trainPool:terminate()
+end
+
+function runBenchmarkSync(batchSize, count)
+
+    if not timer then
+        timer = torch.Timer()
+    end
+    timer:reset()
+    timer:resume()
+
+    numBatches = math.ceil(Ntrain / batchSize)
+
+    for batchNum = 0, numBatches - 1 do
+        trainBatch = getBatch(batchNum, batchSize)
+
+        local a = 0
+        for i = 1,count do
+            a = i
+        end
+    end
+
+    timer:stop()
+    print(string.format('Benchmark time: %.2f seconds\n', timer:time().real))
+end 
+
+function runBenchmarkAsync(batchSize, count)
+
+    if not timer then
+        timer = torch.Timer()
+    end
+    timer:reset()
+    timer:resume()
+
+    numBatches = math.ceil(Ntrain / batchSize)
+
+    loadBatchAsyncImage(0, batchSize)
+
+    for batchNum = 0, numBatches - 1 do
+
+        -- trainBatch = getBatch(batchNum, batchSize, perm)
+        trainBatch = getBufferedBatchImage()
+        -- checksum1 = getBatchChecksum(trainBatch)
+        -- print('checksum1: ' .. checksum1)
+
+        if batchNum < numBatches - 1 then
+            loadBatchAsyncImage(batchNum + 1, batchSize)
+        end
+
+        local a = 0
+        for i = 1,count do
+            a = i
+        end
+    end
+
+    timer:stop()
+    print(string.format('Benchmark time: %.2f seconds\n', timer:time().real))
 end
