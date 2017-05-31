@@ -118,9 +118,17 @@ function getImageModelForFullNet(L, k, type, lrMultForHashLayer)
 
     local model = getImageModel()
 
-    local snapshot2ndLevelDir = 'imageNet'
-    local snapshotFile = 'snapshot_epoch_500.t7'
-    loadModelSnapshot(model, snapshot2ndLevelDir, snapshotFile)
+    local snapshotFile 
+    if p.datasetType == 'mir' then
+        snapshotFile = 'id1.t7'
+    elseif p.datasetType == 'nus' then
+        snapshotFile = 'snapshot_epoch22.t7'
+    end
+    loadModelSnapshot(model, 'imageNet', snapshotFile)
+
+    -- local snapshot2ndLevelDir = 'imageNet'
+    -- local snapshotFile = 'snapshot_epoch_500.t7'
+    -- loadModelSnapshot(model, snapshot2ndLevelDir, snapshotFile)
 
     model.modules[#model.modules] = nil -- This is messy, but need to remove sigmoid layer for now. Will add it back later.
     return createClassifierAndHasher(model, 4096, L, k, type, lrMultForHashLayer)
@@ -136,12 +144,16 @@ function getUntrainedTextModel()
     model:add(nn.Linear(p.tagDim, 2048):init('weight', nninit.xavier, {dist = 'normal', gain = 'relu'}))
     model:add(cudnn.ReLU(true))
     model:add(nn.Dropout(0.500000))
-    -- model:add(nn.Linear(2048, 2048):init('weight', nninit.xavier, {dist = 'normal', gain = 'relu'}))
-    -- model:add(cudnn.ReLU(true))
-    -- model:add(nn.Dropout(0.500000))
+
+    model:add(nn.Linear(2048, 2048):init('weight', nninit.xavier, {dist = 'normal', gain = 'relu'}))
+    model:add(cudnn.ReLU(true))
+    model:add(nn.Dropout(0.500000))
+
     model:add(nn.Linear(2048, p.numClasses):init('weight', nninit.xavier, {dist = 'normal', gain = 'sigmoid'}))
 
     model:add(nn.Sigmoid())
+    
+    model = model:cuda()
 
     return model
 end
@@ -164,15 +176,23 @@ end
 
 function getTextModelForFullNet(L, k, type, lrMultForHashLayer)
 
-    local model
+    local model = getUntrainedTextModel()
+    local snapshotFile 
     if p.datasetType == 'mir' then
-        model = getMirflickrCaffeTrainedTextModel()
+        snapshotFile = '2hl_epoch250.t7'
     elseif p.datasetType == 'nus' then
-        model = getUntrainedTextModel()
-        local snapshot2ndLevelDir = 'textNet/Large'
-        local snapshotFile = 'snapshot_epoch_500.t7'
-        loadModelSnapshot(model, snapshot2ndLevelDir, snapshotFile)
+        snapshotFile = '2hl_epoch100.t7'
     end
+    loadModelSnapshot(model, 'textNet', snapshotFile)
+
+    -- if p.datasetType == 'mir' then
+    --     model = getMirflickrCaffeTrainedTextModel()
+    -- elseif p.datasetType == 'nus' then
+    --     model = getUntrainedTextModel()
+    --     local snapshot2ndLevelDir = 'textNet/Large'
+    --     local snapshotFile = 'snapshot_epoch_500.t7'
+    --     loadModelSnapshot(model, snapshot2ndLevelDir, snapshotFile)
+    -- end
 
     model.modules[#model.modules] = nil -- This is messy, but need to remove sigmoid layer for now. Will add it back later.
 

@@ -4,7 +4,7 @@ function runAllParamsets(datasetType, paramFactorialSet, numEpochs, evalInterval
 
     -- This is the main function to call
 
-    -- TODO: This is set to a constants
+    -- TODO: This is set to a constant
     local iterationsPerEpoch = 25
 
     loadParamsAndPackages(datasetType, iterationsPerEpoch)
@@ -49,7 +49,7 @@ function recursiveRunAllParamsets(pfs_part, pfs_full, paramCount, numParams)
         for _, value in pairs(valueSet) do
 
             -- If this starts a new parameter combination, increment the paramIdx (initialized to 0)
-            if paramName == 'kfn' and value == 1 then
+            if p.numKFoldSplits == 1 or paramName == 'kfn' and value == 1 then
                 g.resultsParamIdx = g.resultsParamIdx + 1
             end
 
@@ -90,6 +90,7 @@ function getNumKFoldSplits(pfs)
             return #pfs[i][2]
         end
     end
+    return 1
 end
 
 function setParamValue(paramName, value)
@@ -158,7 +159,7 @@ function prepare()
     if d.trainset == nil then
         loadData()
     end
-    if d.kNumLoaded == nil or d.kNumLoaded ~= p.kFoldNum then
+    if p.numKFoldSplits > 1 and d.kNumLoaded == nil or d.kNumLoaded ~= p.kFoldNum then
         loadTrainAndValSubsets(p.kFoldNum)
     end
     getOptimStateAndShareParameters('C')

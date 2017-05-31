@@ -87,13 +87,11 @@ function loadPackagesAndModel(datasetType, modality, baseLearningRate, baseWeigh
         p.tagDim = 1075
         snapshotDatasetDir = '/mirflickr'
         g.datasetPath = '/home/kjoslyn/datasets/mirflickr/'
-        g.plotNumEpochs = 5;
     elseif datasetType == 'nus' then
         p.numClasses = 21
         p.tagDim = 1000
         snapshotDatasetDir = '/nuswide'
         g.datasetPath = '/home/kjoslyn/datasets/nuswide/'
-        g.plotNumEpochs = 1;
     else
         print("Error: Unrecognized datasetType!! Should be mir or nus")
     end
@@ -104,6 +102,12 @@ function loadPackagesAndModel(datasetType, modality, baseLearningRate, baseWeigh
     g.snapshotDir = '/home/kjoslyn/kevin/Project/snapshots' .. snapshotDatasetDir
 
     g.numEpochsCompleted = 0
+
+    if datasetType == 'nus' and modality == 'I' then
+        g.plotNumEpochs = 1
+    else
+        g.plotNumEpochs = 5
+    end
 
     -- //////////// Load image / text model
     if modality == 'I' then
@@ -134,7 +138,11 @@ function loadPackagesAndModel(datasetType, modality, baseLearningRate, baseWeigh
     g.minDataLoss = torch.Tensor()
 
     -- TODO: Fix image-text disparity
-    p.baseLearningRate = baseLearningRate or 1e-4
+    if modality == 'I' then
+        p.baseLearningRate = baseLearningRate or 1e-4
+    else
+        p.baseLearningRate = baseLearningRate or .1
+    end
     p.topLearningRate = 0.01
     p.lastLayerLearningRate = 0.1
 
@@ -211,6 +219,7 @@ function loadData(small)
     d.dataset = imageLoader{path=imageRootPath, sampleSize={3,227,227}, splitFolders={'training', 'pretraining', 'val', 'query'}}
 
     Ntrain = d.dataset:sizeTrain() + d.dataset:sizePretraining()
+    -- Ntrain = d.dataset:sizeTrain() + d.dataset:sizePretraining() + d.dataset:sizeVal()
     -- Ntrain = d.dataset:sizeTrain()
     Ntest = d.dataset:sizeTest()
     Nval = d.dataset:sizeVal()
@@ -222,6 +231,7 @@ function loadData(small)
         -- This will actually be used in training, and in evaluating the trainset accuracy
         if not small then
             d.trainset.data, d.trainset.label = d.dataset:getBySplit({'training', 'pretraining'}, 'X', 1, Ntrain)
+            -- d.trainset.data, d.trainset.label = d.dataset:getBySplit({'training', 'pretraining', 'val'}, 'X', 1, Ntrain)
         else
             Ntrain = d.dataset:sizeTrain()
             d.trainset.data, d.trainset.label = d.dataset:getBySplit({'training'}, 'X', 1, Ntrain)
@@ -246,7 +256,7 @@ function trainAndEvaluate(numEpochs, batchSize, lr, mom, wd)
     local batchSize = batchSize or p.batchSize
 
     -- lr and wd parameters should only be used when not setting different learning rates for different layers
-    -- (i.e. image modality)
+    -- (i.e. text modality)
     if lr or wd then
         local lr = lr or p.baseLearningRate
         local wd = wd or p.baseWeightDecay
@@ -265,7 +275,9 @@ function trainAndEvaluate(numEpochs, batchSize, lr, mom, wd)
     -- criterion = nn.MultiLabelSoftMarginCriterion()
     -- criterion = nn.MSECriterion()
     criterion = nn.BCECriterion()
-    criterion.sizeAverage = false -- TODO: This is not in image network!
+    if p.modality == 'I' or p.noSizeAverage then
+        criterion.sizeAverage = false -- TODO: Why does this work better for image modality?
+    end
     criterion = criterion:cuda()
 
     local params, gradParams = m.classifier:getParameters()
@@ -319,10 +331,11 @@ function trainAndEvaluate(numEpochs, batchSize, lr, mom, wd)
                 local dloss_doutputs = criterion:backward(outputs, trainBatch.label)
                 m.classifier:backward(trainBatch.data, dloss_doutputs)
 
-                --TODO: This is not in image network!!!
-                local inputSize = trainBatch.data:size(1)
-                gradParams:div(inputSize)
-                loss = loss/inputSize
+                if p.modality == 'I' or p.noSizeAverage then
+                    local inputSize = trainBatch.data:size(1)
+                    gradParams:div(inputSize)
+                    loss = loss/inputSize
+                end
                 totalLoss = totalLoss + loss
 
                 return loss, gradParams
@@ -365,31 +378,33 @@ function trainAndEvaluate(numEpochs, batchSize, lr, mom, wd)
             g.accIdx = 0
         end
 
-        local saveSnapshot
+        local save
         if p.modality == 'I' then
-            saveSnapshot = epoch % 10 == 0
+            save = epoch % 10 == 0
         else
-            saveSnapshot = epoch == 500 or epoch == 750 or epoch == 900 or epoch == 1000
+            save = epoch == 500 or epoch == 750 or epoch == 900 or epoch == 1000
         end
 
-        if saveSnapshot then
+        if save then
         -- if epoch == 300 or epoch == 500 or epoch == 750 or epoch == 900 or epoch == 1000 then
-            local paramsToSave, gp = m.classifier:getParameters()
             local date = os.date("*t", os.time())
             local dateStr = date.month .. "_" .. date.day .. "_" .. date.hour .. "_" .. date.min
-            local modalityDir
-            if p.modality == 'I' then
-                modalityDir = 'imageNet'
-            else
-                modalityDir = 'textNet'
-            end
-            local snapshotFile = g.snapshotDir .. "/" .. modalityDir .. "/" .. dateStr .. "_snapshot_epoch_" .. epoch .. ".t7" 
-            local snapshot = {}
-            snapshot.params = paramsToSave
-            snapshot.gparams = gp
-            torch.save(snapshotFile, snapshot)
+            saveSnapshot(dateStr .. '_snapshot_epoch_' .. epoch)
         end
 
         g.numEpochsCompleted = g.numEpochsCompleted + 1
     end
+end
+
+function saveSnapshot(filename)
+    local modalityDir
+    if p.modality == 'I' then
+        modalityDir = 'imageNet'
+    else
+        modalityDir = 'textNet'
+    end
+    local snapshot = {}
+    snapshot.params, snapshot.gparams = m.classifier:getParameters()
+    snapshot.g = g
+    torch.save(g.snapshotDir .. '/' .. modalityDir .. '/' .. filename .. '.t7', snapshot)
 end

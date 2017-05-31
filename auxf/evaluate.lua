@@ -37,7 +37,7 @@ function getClassAccuracyForModality(modality)
         data = d.trainset[X].data
         labels = d.trainset[X].label:float()
     end
-    return getClassAccuracy(data, labels)
+    return getClassAccuracy(data, labels:cuda())
 end
 
 -- //////////////////////////////
@@ -93,75 +93,93 @@ end
 -- mAP Functions
 -- /////////////////////////////
 
-function getQueryAndDBCodes(fromModality, toModality, trainOrVal)
+local function getClassesAndQuantity(classArg)
 
-    local endIdx = nil
-    local imageIdxSet = nil
-    local textIdxSet = nil
-
-    -- d.trainImages, d.trainTexts, d.valImages, and d.valTexts come from pickSubset.lua. They are the indices of the images and texts that are
-    -- used in training or validation respectively. They index d.trainset[modality]. Only 5000 images and 5000 texts are used for training,
-    -- and 1000 images and 1000 texts are used for validation.
-    if trainOrVal == 'train' then
-        endIdx = d.trainImages:size(1)
-        imageIdxSet = d.trainImages
-        textIdxSet = d.trainTexts
-    elseif trainOrVal == 'val' then
-        endIdx = d.valImages:size(1)
-        imageIdxSet = d.valImages
-        textIdxSet = d.valTexts
-    else
-        print("Error: input to getQueryAndDBCodes must be \'train\' or \'val\'")
+    local classes
+    if type(classArg) == 'string' then
+        classes = {classArg}
+    elseif type(classArg) == 'table' then
+        classes = classArg
     end
 
-    images = imageIdxSet[ {{ 1, endIdx }} ]:long()
-    texts = textIdxSet[ {{ 1, endIdx }} ]:long()
-
-    if fromModality == I then
-        queries = d.trainset[I].data:index(1, images)
-        queryLabels = d.trainset[I].label:float():index(1, images)
-    else
-        queries = d.trainset[X].data:index(1, texts)
-        queryLabels = d.trainset[X].label:float():index(1, texts)
+    local quantity = 0
+    local includePretraining = false
+    for c = 1, #classes do
+        local class = classes[c]
+        if class == 'training' then
+            quantity = quantity + d.dataset:sizeTrain()
+        elseif class == 'pretraining' then
+            quantity = quantity + d.dataset:sizePretraining()
+            includePretraining = true
+        elseif class == 'val' then
+            quantity = quantity + d.dataset:sizeVal()
+        elseif class == 'query' then
+            quantity = quantity + d.datatset:sizeTest()
+        end
     end
 
-    if toModality == I then
-        database = d.trainset[I].data:index(1, images)
-        databaseLabels = d.trainset[I].label:float():index(1, images)
-    else
-        database = d.trainset[X].data:index(1, texts)
-        databaseLabels = d.trainset[X].label:float():index(1, texts)
-    end
-
-    queryCodes = getHashCodes(queries)
-    databaseCodes = getHashCodes(database)
-
-    return queryCodes, databaseCodes, queryLabels, databaseLabels
+    return classes, quantity, includePretraining
 end
 
--- TODO: Incorporate pretrain set
-function getQueryAndDBCodesTest(fromModality, toModality)
+function getImageCodesAndLabels(classArg)
 
-    if fromModality == I then
-        queries = d.testset[I].data
-        queryLabels = d.testset[I].label:float()
-    else
-        queries = d.testset[X].data
-        queryLabels = d.testset[X].label:float()
+    local classes, N, includePretraining = getClassesAndQuantity(classArg)
+
+    local codes = torch.CudaLongTensor(N, p.L)
+    local labels = torch.FloatTensor(N, p.numClasses)
+
+    local allData = torch.FloatTensor() -- TODO: Correct?
+    local allLabels = torch.FloatTensor()
+    if not includePretraining then
+        for c = 1, #classes do
+            local catData, catLabels
+            local class = classes[c]
+            if class == 'training' then
+                catData = d.trainset[I].data
+                catLabels = d.trainset[I].label
+            elseif class == 'val' then
+                catData = d.valset[I].data
+                catLabels = d.valset[I].label
+            elseif class == 'query' then
+                catData = d.testset[I].data
+                catLabels = d.testset[I].label
+            end
+            allData = torch.cat(allData, catData, 1)
+            allLabels = torch.cat(allLabels, catLabels, 1)
+        end
     end
 
-    if toModality == I then
-        database = d.trainset[I].data
-        databaseLabels = d.trainset[I].label:float()
-    else
-        database = d.trainset[X].data
-        databaseLabels = d.trainset[X].label:float()
+    local batchSize = 128
+    local numBatches = math.ceil(N / batchSize)
+
+    for batchNum = 0, numBatches - 1 do
+
+        local startIndex = batchNum * batchSize + 1
+        local endIndex = math.min((batchNum + 1) * batchSize, N)
+
+        local batchData, batchLabels
+        if includePretraining then
+            batchData, batchLabels = d.dataset:getBySplit(classes, 'I', startIndex, endIndex)
+        else
+            batchData = allData[{ {startIndex, endIndex} }]
+            batchLabels = allLabels[{ {startIndex, endIndex} }]
+        end
+
+        codes[{ {startIndex, endIndex} }] = calcHashCodes(batchData):reshape(endIndex - startIndex + 1, p.L)
+        labels[{ {startIndex, endIndex} }] = batchLabels
     end
 
-    queryCodes = getHashCodes(queries)
-    databaseCodes = getHashCodes(database)
+    return codes, labels
+end
 
-    return queryCodes, databaseCodes, queryLabels, databaseLabels
+function getTextCodesAndLabels(classArg)
+
+    local classes, quantity, includePretraining = getClassesAndQuantity(classArg)
+
+    local tags, labels = d.dataset:getBySplit(classes, 'X', 1, quantity)
+    local codes = calcHashCodes(tags):reshape(quantity, p.L)
+
+    return codes, labels
 end
 
 function getDistanceAndSimilarityForMAP(queryCodes, databaseCodes, queryLabels, databaseLabels)
@@ -198,26 +216,25 @@ function saveDistAndSimToMatFile(D,S)
     matio.save(g.snapshotDir .. '/DS_data_' .. dateStr .. '.mat', {D=D_new,S=S_new})
 end
 
-function calcMAP(fromModality, toModality, trainValOrTest, saveToMatFile)
+function calcMAP(modalityFrom, modalityTo, classesFrom, classesTo)
 
     m.fullModel:evaluate()
 
-    if trainValOrTest == 'test' then
-        queryCodes, databaseCodes, queryLabels, databaseLabels = getQueryAndDBCodesTest(fromModality, toModality, false)
+    local queryCodes, queryLabels, dbCodes, dbLabels
+    if modalityFrom == I then
+        queryCodes, queryLabels = getImageCodesAndLabels(classesFrom)
+        dbCodes, dbLabels = getTextCodesAndLabels(classesTo)
     else
-        queryCodes, databaseCodes, queryLabels, databaseLabels = getQueryAndDBCodes(fromModality, toModality, trainValOrTest)
+        queryCodes, queryLabels = getTextCodesAndLabels(classesFrom)
+        dbCodes, dbLabels = getImageCodesAndLabels(classesTo)
     end
 
-    databaseCodes = databaseCodes:reshape(databaseCodes:size(1), databaseCodes:size(2))
-    queryCodes = queryCodes:reshape(queryCodes:size(1), queryCodes:size(2))
-
     if saveToMatFile then
-        local D, S = getDistanceAndSimilarityForMAP(queryCodes, databaseCodes, queryLabels, databaseLabels)
+        local D, S = getDistanceAndSimilarityForMAP(queryCodes, dbCodes, queryLabels, dbLabels)
         saveDistAndSimToMatFile(D,S)
     end
 
-    -- return compute_map(queryCodes, databaseCodes, S)
-    return calcMAP_old(queryCodes, databaseCodes, queryLabels, databaseLabels)
+    return calcMAP_old(queryCodes, dbCodes, queryLabels, dbLabels)
 end
 
 function compute_map(test_data, train_data, similarities)
@@ -281,12 +298,10 @@ end
 -- Regularizer evaluation functions
 -- /////////////////////////////
 
-function getHashCodeBitCounts(data)
+function getHashCodeBitCounts(trainset)
 
-    -- data should be d.trainset or trainBatch.data
-
-    local th = getHashCodes(data[X])
-    local ih = getHashCodes(data[I])
+    local th = getHashCodes(trainset[X].data)
+    local ih = getHashCodes(trainset[I].data)
     local ibc = torch.LongTensor(p.L,p.k)
     local tbc = torch.LongTensor(p.L,p.k)
     for i=1,p.L do
@@ -306,7 +321,7 @@ end
 
 function getSoftMaxAvgDistFromOneHalf(modality)
 
-    local pred = getRawPredictions(d.trainset[modality])
+    local pred = getRawPredictions(d.trainset[modality].data)
     pred = pred:view(-1)
     local avgDist = torch.abs(pred - 0.5):mean()
 

@@ -39,7 +39,8 @@ function loadParamsAndPackages(datasetType, iterationsPerEpoch)
   p.sim_label_type = 'fixed' -- 'variable'
   p.baseLearningRate = 1e-6
   p.baseLearningRateDecay = 0 -- 1e-3
-  p.baseMomentum = 0 -- .9
+  -- p.baseMomentum = 0 -- .9
+  p.baseMomentum = .9 -- .9
   p.baseWeightDecay = 0
   p.posExamplesPerBatch = 25 -- 20
   p.negExamplesPerBatch = 75 -- 100
@@ -62,10 +63,12 @@ function loadParamsAndPackages(datasetType, iterationsPerEpoch)
   local snapshotDatasetDir
   if datasetType == 'mir' then
       p.numClasses = 24
+      p.tagDim = 1075
       snapshotDatasetDir = '/mirflickr'
       g.datasetPath = '/home/kjoslyn/datasets/mirflickr/'
   elseif datasetType == 'nus' then
       p.numClasses = 21
+      p.tagDim = 1000
       snapshotDatasetDir = '/nuswide'
       g.datasetPath = '/home/kjoslyn/datasets/nuswide/'
   else
@@ -121,9 +124,10 @@ function loadData()
   d.testset = {}
   d.testset[I] = {}
   d.testset[X] = {}
+  d.pretrainset = {}
+  d.pretrainset[I] = {}
+  d.pretrainset[X] = {}
 
-  -- This will only be used in evaluating the trainset accuracy. Training will include pretraining
-  -- The entire trainset (including pretrain) is too larget to hold in memory
   d.trainset[I].data, d.trainset[I].label = d.dataset:getBySplit('training', 'I', 1, d.dataset:sizeTrain())
   d.trainset[X].data, d.trainset[X].label = d.dataset:getBySplit('training', 'X', 1, d.dataset:sizeTrain())
 
@@ -133,7 +137,7 @@ function loadData()
   d.testset[I].data, d.testset[I].label = d.dataset:getBySplit('query', 'I', 1, d.dataset:sizeTest())
   d.testset[X].data, d.testset[X].label = d.dataset:getBySplit('query', 'X', 1, d.dataset:sizeTest())
 
-  pairs = torch.load(g.datasetPath .. 'crossModalPairs.t7')
+  local pairs = torch.load(g.datasetPath .. 'crossModalPairs.t7')
   d.pos_pairs_full = pairs.pos_pairs
   d.neg_pairs_full = pairs.neg_pairs
 
@@ -152,7 +156,7 @@ function loadData()
   --     d.testset[I].data = queryset.data
   --     d.trainset[I].label = trainset.label
   --     d.testset[I].label = queryset.label
-  --     d.trainset[X] = trainset.tags
+  --     d.trainset[X].data = trainset.tags
   --     d.testset[X].data = queryset.tags
   --     d.trainset[X].label = trainset.label
   --     d.testset[X].label = queryset.label
@@ -164,22 +168,22 @@ function loadData()
 
 end -- end loadData()
 
-function loadTrainAndValSubsets(kNum)
+-- function loadTrainAndValSubsets(kNum)
 
-  pairs = torch.load(g.datasetPath .. 'crossModalPairs.t7')
-  d.pos_pairs_full = pairs.pos_pairs
-  d.neg_pairs_full = pairs.neg_pairs
+--   pairs = torch.load(g.datasetPath .. 'crossModalPairs.t7')
+--   d.pos_pairs_full = pairs.pos_pairs
+--   d.neg_pairs_full = pairs.neg_pairs
 
-  if not kNum then
-      d.pos_pairs_full, d.neg_pairs_full, d.trainImages, d.trainTexts, d.valImages, d.valTexts, d.pos_pairs_image, d.neg_pairs_image, d.pos_pairs_text, d.neg_pairs_text = pickSubset(true)
-  else
-      if not d.kFold_images then
-        pickKFoldSubset(p.kFoldSplitSize, p.kFoldNumSplits, true)
-      end
-      d.pos_pairs_full, d.neg_pairs_full, d.trainImages, d.trainTexts, d.valImages, d.valTexts = getKFoldSplit(kNum)
-      d.kNumLoaded = kNum
-  end
-end
+--   if not kNum then
+--       d.pos_pairs_full, d.neg_pairs_full, d.trainImages, d.trainTexts, d.valImages, d.valTexts, d.pos_pairs_image, d.neg_pairs_image, d.pos_pairs_text, d.neg_pairs_text = pickSubset(true)
+--   else
+--       if not d.kFold_images then
+--         pickKFoldSubset(p.kFoldSplitSize, p.kFoldNumSplits, true)
+--       end
+--       d.pos_pairs_full, d.neg_pairs_full, d.trainImages, d.trainTexts, d.valImages, d.valTexts = getKFoldSplit(kNum)
+--       d.kNumLoaded = kNum
+--   end
+-- end
 
 function runEvals()
 
@@ -194,22 +198,22 @@ function runEvals()
 
   local imageAccuracy = getClassAccuracyForModality(I)
   local textAccuracy = getClassAccuracyForModality(X)
-  statsPrint(string.format('Image Classification Acc: %.2f', imageAccuracy), g.sf, g.sfv)
-  statsPrint(string.format('Text Classification Acc: %.2f', textAccuracy), g.sf, g.sfv)
+  statsPrint(string.format('Train Image Classification Acc: %.2f', imageAccuracy), g.sf, g.sfv)
+  statsPrint(string.format('Train Text Classification Acc: %.2f', textAccuracy), g.sf, g.sfv)
 
   local batchTextClassAcc = getClassAccuracy(trainBatch.data[X], trainBatch.label[X])
   local batchImageClassAcc = getClassAccuracy(trainBatch.data[I], trainBatch.label[I])-- TODO: This is not very useful because it is only for the last batch in the epoch
   statsPrint(string.format("Batch Text Classification Acc = %.2f", batchTextClassAcc), g.sfv)
   statsPrint(string.format("Batch Image Classification Acc = %.2f", batchImageClassAcc), g.sfv)
 
-  local IXt = calcMAP(I, X, 'train')
-  local XIt = calcMAP(X, I, 'train')
-  local IXv = calcMAP(I, X, 'val')
-  local XIv = calcMAP(X, I, 'val')
-  local IIt = calcMAP(I, I, 'train')
-  local XXt = calcMAP(X, X, 'train')
-  local IIv = calcMAP(I, I, 'val')
-  local XXv = calcMAP(X, X, 'val')
+  local IXt = calcMAP(I, X, 'training', 'training')
+  local XIt = calcMAP(X, I, 'training', 'training')
+  local IXv = calcMAP(I, X, 'val', 'val')
+  local XIv = calcMAP(X, I, 'val', 'val')
+  local IIt = calcMAP(I, I, 'training', 'training')
+  local XXt = calcMAP(X, X, 'training', 'training')
+  local IIv = calcMAP(I, I, 'val', 'val')
+  local XXv = calcMAP(X, X, 'val', 'val')
 
   statsPrint(string.format("X -> I train MAP = %.2f", XIt), g.sf, g.sfv)
   statsPrint(string.format("I -> X train MAP = %.2f", IXt), g.sf, g.sfv)
@@ -319,10 +323,35 @@ function changeLearningRateForClassifier(lrMult)
 
   if not classifierWeightIndices then
     classifierWeightIndices = o.optimState_full.learningRates:eq(1)
-    hashLayerIndices = o.optimState_full.learningRates:neq(1)
+    hashLayerIndices = o.optimState_full.learningRates:ne(1)
   end
   o.optimState_full.learningRates[classifierWeightIndices] = lrMult
 
+end
+
+function changeLearningRateForHashLayer(lrMult)
+
+  -- if not classifierWeightIndices then
+  --   classifierWeightIndices = o.optimState_full.learningRates:eq(1)
+  --   hashLayerIndices = o.optimState_full.learningRates:ne(1)
+  -- end
+  -- o.optimState_full.learningRates[hashLayerIndices] = lrMult
+
+  -- Image
+  m.fullModel:get(1):get(1):get(2):get(1):get(23):get(2):get(1):learningRate('weight', lrMult)
+  m.fullModel:get(1):get(1):get(2):get(1):get(23):get(2):get(1):learningRate('bias', lrMult)
+  m.fullModel:get(1):get(1):get(2):get(1):get(23):get(2):get(2):learningRate('weight', lrMult)
+  m.fullModel:get(1):get(1):get(2):get(1):get(23):get(2):get(2):learningRate('bias', lrMult)
+
+  -- Text
+  m.fullModel:get(1):get(2):get(2):get(1):get(10):get(2):get(1):learningRate('weight', lrMult)
+  m.fullModel:get(1):get(2):get(2):get(1):get(10):get(2):get(1):learningRate('bias', lrMult)
+  m.fullModel:get(1):get(2):get(2):get(1):get(10):get(2):get(2):learningRate('weight', lrMult)
+  m.fullModel:get(1):get(2):get(2):get(1):get(10):get(2):get(2):learningRate('bias', lrMult)
+
+  local learningRates, weightDecays = m.classifier:getOptimConfig(p.baseLearningRate, p.baseWeightDecay)
+  o.optimState_full.learningRates = learningRates
+  o.optimState_full.weightDecays = weightDecays
 end
 
 function getModalitySpecifics(modality)
@@ -369,7 +398,7 @@ function getInputAndTarget(modality, trainBatch)
   end
 
   local batchSize = trainBatch.data[1]:size(1)
-  local trainSize = d.trainset[1]:size(1)
+  local trainSize = d.trainset[1].data:size(1)
   local trainEstimatorConst = trainSize / batchSize
   -- beta_im_pre = torch.sum(imPred, 1):view(-1):mul(trainEstimatorConst)
   -- beta_te_pre = torch.sum(tePred, 1):view(-1):mul(trainEstimatorConst)
