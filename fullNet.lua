@@ -39,7 +39,6 @@ function loadParamsAndPackages(datasetType, iterationsPerEpoch)
   p.sim_label_type = 'fixed' -- 'variable'
   p.baseLearningRate = 1e-6
   p.baseLearningRateDecay = 0 -- 1e-3
-  -- p.baseMomentum = 0 -- .9
   p.baseMomentum = .9 -- .9
   p.baseWeightDecay = 0
   p.posExamplesPerBatch = 25 -- 20
@@ -112,9 +111,6 @@ end
 
 function loadData() 
 
-  local imageRootPath = g.datasetPath .. 'ImageData'
-  d.dataset = imageLoader{path=imageRootPath, sampleSize={3,227,227}, splitFolders={'training', 'pretraining', 'val', 'query'}}
-
   d.trainset = {}
   d.trainset[I] = {}
   d.trainset[X] = {}
@@ -127,6 +123,9 @@ function loadData()
   d.pretrainset = {}
   d.pretrainset[I] = {}
   d.pretrainset[X] = {}
+
+  local imageRootPath = g.datasetPath .. 'ImageData'
+  d.dataset = imageLoader{path=imageRootPath, sampleSize={3,227,227}, splitFolders={'training', 'pretraining', 'val', 'query'}}
 
   d.trainset[I].data, d.trainset[I].label = d.dataset:getBySplit('training', 'I', 1, d.dataset:sizeTrain())
   d.trainset[X].data, d.trainset[X].label = d.dataset:getBySplit('training', 'X', 1, d.dataset:sizeTrain())
@@ -141,49 +140,7 @@ function loadData()
   d.pos_pairs_full = pairs.pos_pairs
   d.neg_pairs_full = pairs.neg_pairs
 
-  -- if not d.trainset then
-  --     d.trainset = {}
-  --     d.testset = {}
-
-  --     local trainset, queryset, valset
-  --     if p.datasetType == 'mir' then
-  --       trainset, pretrainset, queryset, valset = getImageAndTextDataMirflickr()
-  --     elseif p.datasetType == 'nus' then
-  --       trainset, queryset, valset = getImageAndTextDataNuswide()
-  --     end
-
-  --     d.trainset[I].data = trainset.data
-  --     d.testset[I].data = queryset.data
-  --     d.trainset[I].label = trainset.label
-  --     d.testset[I].label = queryset.label
-  --     d.trainset[X].data = trainset.tags
-  --     d.testset[X].data = queryset.tags
-  --     d.trainset[X].label = trainset.label
-  --     d.testset[X].label = queryset.label
-  -- end
-
-  -- if not d.pos_pairs_full then
-  --     d.pos_pairs_full, d.neg_pairs_full, d.trainImages, d.trainTexts, d.valImages, d.valTexts, d.pos_pairs_image, d.neg_pairs_image, d.pos_pairs_text, d.neg_pairs_text = pickSubset(true)
-  -- end
-
 end -- end loadData()
-
--- function loadTrainAndValSubsets(kNum)
-
---   pairs = torch.load(g.datasetPath .. 'crossModalPairs.t7')
---   d.pos_pairs_full = pairs.pos_pairs
---   d.neg_pairs_full = pairs.neg_pairs
-
---   if not kNum then
---       d.pos_pairs_full, d.neg_pairs_full, d.trainImages, d.trainTexts, d.valImages, d.valTexts, d.pos_pairs_image, d.neg_pairs_image, d.pos_pairs_text, d.neg_pairs_text = pickSubset(true)
---   else
---       if not d.kFold_images then
---         pickKFoldSubset(p.kFoldSplitSize, p.kFoldNumSplits, true)
---       end
---       d.pos_pairs_full, d.neg_pairs_full, d.trainImages, d.trainTexts, d.valImages, d.valTexts = getKFoldSplit(kNum)
---       d.kNumLoaded = kNum
---   end
--- end
 
 function runEvals()
 
@@ -331,12 +288,6 @@ end
 
 function changeLearningRateForHashLayer(lrMult)
 
-  -- if not classifierWeightIndices then
-  --   classifierWeightIndices = o.optimState_full.learningRates:eq(1)
-  --   hashLayerIndices = o.optimState_full.learningRates:ne(1)
-  -- end
-  -- o.optimState_full.learningRates[hashLayerIndices] = lrMult
-
   -- Image
   m.fullModel:get(1):get(1):get(2):get(1):get(23):get(2):get(1):learningRate('weight', lrMult)
   m.fullModel:get(1):get(1):get(2):get(1):get(23):get(2):get(1):learningRate('bias', lrMult)
@@ -344,10 +295,16 @@ function changeLearningRateForHashLayer(lrMult)
   m.fullModel:get(1):get(1):get(2):get(1):get(23):get(2):get(2):learningRate('bias', lrMult)
 
   -- Text
-  m.fullModel:get(1):get(2):get(2):get(1):get(10):get(2):get(1):learningRate('weight', lrMult)
-  m.fullModel:get(1):get(2):get(2):get(1):get(10):get(2):get(1):learningRate('bias', lrMult)
-  m.fullModel:get(1):get(2):get(2):get(1):get(10):get(2):get(2):learningRate('weight', lrMult)
-  m.fullModel:get(1):get(2):get(2):get(1):get(10):get(2):get(2):learningRate('bias', lrMult)
+  -- 2 hidden layer text model
+  -- m.fullModel:get(1):get(2):get(2):get(1):get(10):get(2):get(1):learningRate('weight', lrMult)
+  -- m.fullModel:get(1):get(2):get(2):get(1):get(10):get(2):get(1):learningRate('bias', lrMult)
+  -- m.fullModel:get(1):get(2):get(2):get(1):get(10):get(2):get(2):learningRate('weight', lrMult)
+  -- m.fullModel:get(1):get(2):get(2):get(1):get(10):get(2):get(2):learningRate('bias', lrMult)
+  -- 1 hidden layer text model
+  m.fullModel:get(1):get(2):get(2):get(1):get(7):get(2):get(1):learningRate('weight', lrMult)
+  m.fullModel:get(1):get(2):get(2):get(1):get(7):get(2):get(1):learningRate('bias', lrMult)
+  m.fullModel:get(1):get(2):get(2):get(1):get(7):get(2):get(2):learningRate('weight', lrMult)
+  m.fullModel:get(1):get(2):get(2):get(1):get(7):get(2):get(2):learningRate('bias', lrMult)
 
   local learningRates, weightDecays = m.classifier:getOptimConfig(p.baseLearningRate, p.baseWeightDecay)
   o.optimState_full.learningRates = learningRates

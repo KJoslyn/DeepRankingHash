@@ -145,9 +145,9 @@ function getUntrainedTextModel()
     model:add(cudnn.ReLU(true))
     model:add(nn.Dropout(0.500000))
 
-    model:add(nn.Linear(2048, 2048):init('weight', nninit.xavier, {dist = 'normal', gain = 'relu'}))
-    model:add(cudnn.ReLU(true))
-    model:add(nn.Dropout(0.500000))
+    -- model:add(nn.Linear(2048, 2048):init('weight', nninit.xavier, {dist = 'normal', gain = 'relu'}))
+    -- model:add(cudnn.ReLU(true))
+    -- model:add(nn.Dropout(0.500000))
 
     model:add(nn.Linear(2048, p.numClasses):init('weight', nninit.xavier, {dist = 'normal', gain = 'sigmoid'}))
 
@@ -179,9 +179,11 @@ function getTextModelForFullNet(L, k, type, lrMultForHashLayer)
     local model = getUntrainedTextModel()
     local snapshotFile 
     if p.datasetType == 'mir' then
-        snapshotFile = '2hl_epoch250.t7'
+        -- snapshotFile = '2hl_epoch250.t7'
+        snapshotFile = 'sn1700.t7'
     elseif p.datasetType == 'nus' then
-        snapshotFile = '2hl_epoch100.t7'
+        -- snapshotFile = '2hl_epoch100.t7'
+        snapshotFile = '1hl_epoch100.t7'
     end
     loadModelSnapshot(model, 'textNet', snapshotFile)
 
