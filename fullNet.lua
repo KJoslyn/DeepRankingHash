@@ -39,8 +39,7 @@ function loadParamsAndPackages(datasetType, iterationsPerEpoch)
   p.sim_label_type = 'fixed' -- 'variable'
   p.baseLearningRate = 1e-6
   p.baseLearningRateDecay = 0 -- 1e-3
-  -- p.baseMomentum = 0 -- .9
-  p.baseMomentum = .9 -- .9
+  p.baseMomentum = 0 -- .9
   p.baseWeightDecay = 0
   p.posExamplesPerBatch = 25 -- 20
   p.negExamplesPerBatch = 75 -- 100
@@ -110,10 +109,50 @@ function loadFullModel(modelType, lrMultForHashLayer, loadSiameseModels)
   end
 end
 
-function loadData() 
+-- Used to load data from the old mirflickr_trainset etc. files
+function loadDataRetro()
 
-  local imageRootPath = g.datasetPath .. 'ImageData'
-  d.dataset = imageLoader{path=imageRootPath, sampleSize={3,227,227}, splitFolders={'training', 'pretraining', 'val', 'query'}}
+  local fp = '/home/kjoslyn/datasets/mirflickr/old/'
+
+  local train_images = torch.load(fp .. 'mirflickr_trainset.t7')
+  local test_images = torch.load(fp .. 'mirflickr_testset.t7')
+
+  local mean = {} -- store the mean, to normalize the test set in the future
+  local stdv  = {} -- store the standard-deviation for the future
+  for i=1,3 do -- over each image channel
+      mean[i] = train_images.data[{ {}, {i}, {}, {}  }]:mean() -- mean estimation
+      train_images.data[{ {}, {i}, {}, {}  }]:add(-mean[i]) -- mean subtraction
+      test_images.data[{ {}, {i}, {}, {}  }]:add(-mean[i]) -- mean subtraction
+
+      stdv[i] = train_images.data[{ {}, {i}, {}, {}  }]:std() -- std estimation
+      train_images.data[{ {}, {i}, {}, {}  }]:div(stdv[i]) -- std scaling
+      test_images.data[{ {}, {i}, {}, {}  }]:div(stdv[i]) -- std scaling
+  end
+
+  d.trainset[I].data = train_images.data
+  d.testset[I].data = test_images.data
+  d.trainset[I].label = train_images.label
+  d.testset[I].label = test_images.label
+  
+  local train_texts = torch.load(fp .. 'mirTagTr.t7')
+  local test_texts = torch.load(fp .. 'mirTagTe.t7')
+
+  local train_labels_text = torch.load(fp .. 'mirflickrLabelTr.t7') -- load from t7 file
+  local test_labels_text = torch.load(fp .. 'mirflickrLabelTe.t7') -- load from t7 file
+
+  d.trainset[X].data = train_texts.T_tr
+  d.testset[X].data = test_texts.T_te
+  d.trainset[X].label = train_labels_text.L_tr
+  d.testset[X].label = test_labels_text.L_te
+
+  d.valset = d.testset
+
+  subset_info = torch.load(fp .. 'subsetInfo.t7')
+  d.pos_pairs_full = subset_info.pos_pairs
+  d.neg_pairs_full = subset_info.neg_pairs
+end
+
+function loadData() 
 
   d.trainset = {}
   d.trainset[I] = {}
@@ -128,6 +167,9 @@ function loadData()
   d.pretrainset[I] = {}
   d.pretrainset[X] = {}
 
+  local imageRootPath = g.datasetPath .. 'ImageData'
+  d.dataset = imageLoader{path=imageRootPath, sampleSize={3,227,227}, splitFolders={'training', 'pretraining', 'val', 'query'}}
+
   d.trainset[I].data, d.trainset[I].label = d.dataset:getBySplit('training', 'I', 1, d.dataset:sizeTrain())
   d.trainset[X].data, d.trainset[X].label = d.dataset:getBySplit('training', 'X', 1, d.dataset:sizeTrain())
 
@@ -141,49 +183,7 @@ function loadData()
   d.pos_pairs_full = pairs.pos_pairs
   d.neg_pairs_full = pairs.neg_pairs
 
-  -- if not d.trainset then
-  --     d.trainset = {}
-  --     d.testset = {}
-
-  --     local trainset, queryset, valset
-  --     if p.datasetType == 'mir' then
-  --       trainset, pretrainset, queryset, valset = getImageAndTextDataMirflickr()
-  --     elseif p.datasetType == 'nus' then
-  --       trainset, queryset, valset = getImageAndTextDataNuswide()
-  --     end
-
-  --     d.trainset[I].data = trainset.data
-  --     d.testset[I].data = queryset.data
-  --     d.trainset[I].label = trainset.label
-  --     d.testset[I].label = queryset.label
-  --     d.trainset[X].data = trainset.tags
-  --     d.testset[X].data = queryset.tags
-  --     d.trainset[X].label = trainset.label
-  --     d.testset[X].label = queryset.label
-  -- end
-
-  -- if not d.pos_pairs_full then
-  --     d.pos_pairs_full, d.neg_pairs_full, d.trainImages, d.trainTexts, d.valImages, d.valTexts, d.pos_pairs_image, d.neg_pairs_image, d.pos_pairs_text, d.neg_pairs_text = pickSubset(true)
-  -- end
-
 end -- end loadData()
-
--- function loadTrainAndValSubsets(kNum)
-
---   pairs = torch.load(g.datasetPath .. 'crossModalPairs.t7')
---   d.pos_pairs_full = pairs.pos_pairs
---   d.neg_pairs_full = pairs.neg_pairs
-
---   if not kNum then
---       d.pos_pairs_full, d.neg_pairs_full, d.trainImages, d.trainTexts, d.valImages, d.valTexts, d.pos_pairs_image, d.neg_pairs_image, d.pos_pairs_text, d.neg_pairs_text = pickSubset(true)
---   else
---       if not d.kFold_images then
---         pickKFoldSubset(p.kFoldSplitSize, p.kFoldNumSplits, true)
---       end
---       d.pos_pairs_full, d.neg_pairs_full, d.trainImages, d.trainTexts, d.valImages, d.valTexts = getKFoldSplit(kNum)
---       d.kNumLoaded = kNum
---   end
--- end
 
 function runEvals()
 
@@ -331,12 +331,6 @@ end
 
 function changeLearningRateForHashLayer(lrMult)
 
-  -- if not classifierWeightIndices then
-  --   classifierWeightIndices = o.optimState_full.learningRates:eq(1)
-  --   hashLayerIndices = o.optimState_full.learningRates:ne(1)
-  -- end
-  -- o.optimState_full.learningRates[hashLayerIndices] = lrMult
-
   -- Image
   m.fullModel:get(1):get(1):get(2):get(1):get(23):get(2):get(1):learningRate('weight', lrMult)
   m.fullModel:get(1):get(1):get(2):get(1):get(23):get(2):get(1):learningRate('bias', lrMult)
@@ -344,12 +338,18 @@ function changeLearningRateForHashLayer(lrMult)
   m.fullModel:get(1):get(1):get(2):get(1):get(23):get(2):get(2):learningRate('bias', lrMult)
 
   -- Text
-  m.fullModel:get(1):get(2):get(2):get(1):get(10):get(2):get(1):learningRate('weight', lrMult)
-  m.fullModel:get(1):get(2):get(2):get(1):get(10):get(2):get(1):learningRate('bias', lrMult)
-  m.fullModel:get(1):get(2):get(2):get(1):get(10):get(2):get(2):learningRate('weight', lrMult)
-  m.fullModel:get(1):get(2):get(2):get(1):get(10):get(2):get(2):learningRate('bias', lrMult)
+  -- 2 hidden layer text model
+  -- m.fullModel:get(1):get(2):get(2):get(1):get(10):get(2):get(1):learningRate('weight', lrMult)
+  -- m.fullModel:get(1):get(2):get(2):get(1):get(10):get(2):get(1):learningRate('bias', lrMult)
+  -- m.fullModel:get(1):get(2):get(2):get(1):get(10):get(2):get(2):learningRate('weight', lrMult)
+  -- m.fullModel:get(1):get(2):get(2):get(1):get(10):get(2):get(2):learningRate('bias', lrMult)
+  -- 1 hidden layer text model
+  m.fullModel:get(1):get(2):get(2):get(1):get(7):get(2):get(1):learningRate('weight', lrMult)
+  m.fullModel:get(1):get(2):get(2):get(1):get(7):get(2):get(1):learningRate('bias', lrMult)
+  m.fullModel:get(1):get(2):get(2):get(1):get(7):get(2):get(2):learningRate('weight', lrMult)
+  m.fullModel:get(1):get(2):get(2):get(1):get(7):get(2):get(2):learningRate('bias', lrMult)
 
-  local learningRates, weightDecays = m.classifier:getOptimConfig(p.baseLearningRate, p.baseWeightDecay)
+  local learningRates, weightDecays = m.fullModel:getOptimConfig(p.baseLearningRate, p.baseWeightDecay)
   o.optimState_full.learningRates = learningRates
   o.optimState_full.weightDecays = weightDecays
 end

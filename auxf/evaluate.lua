@@ -107,14 +107,26 @@ local function getClassesAndQuantity(classArg)
     for c = 1, #classes do
         local class = classes[c]
         if class == 'training' then
-            quantity = quantity + d.dataset:sizeTrain()
+            if d.dataset then
+                quantity = quantity + d.dataset:sizeTrain()
+            else
+                quantity = quantity + d.trainset[1].data:size(1)
+            end
         elseif class == 'pretraining' then
             quantity = quantity + d.dataset:sizePretraining()
             includePretraining = true
         elseif class == 'val' then
-            quantity = quantity + d.dataset:sizeVal()
+            if d.dataset then
+                quantity = quantity + d.dataset:sizeVal()
+            else
+                quantity = quantity + d.valset[1].data:size(1)
+            end
         elseif class == 'query' then
-            quantity = quantity + d.datatset:sizeTest()
+            if d.dataset then
+                quantity = quantity + d.dataset:sizeTest()
+            else
+                quantity = quantity + d.testset[1].data:size(1)
+            end
         end
     end
 
@@ -176,7 +188,21 @@ function getTextCodesAndLabels(classArg)
 
     local classes, quantity, includePretraining = getClassesAndQuantity(classArg)
 
-    local tags, labels = d.dataset:getBySplit(classes, 'X', 1, quantity)
+    local tags, labels
+    if d.dataset then
+        tags, labels = d.dataset:getBySplit(classes, 'X', 1, quantity)
+    else
+        if classes[1] == 'training' then
+            tags = d.trainset[X].data
+            labels = d.trainset[X].label:float()
+        elseif classes[1] == 'query' then
+            tags = d.testset[X].data
+            labels = d.testset[X].label:float()
+        elseif classes[1] == 'val' then
+            tags = d.valset[X].data
+            labels = d.valset[X].label:float()
+        end
+    end
     local codes = calcHashCodes(tags):reshape(quantity, p.L)
 
     return codes, labels

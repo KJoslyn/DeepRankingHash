@@ -178,7 +178,7 @@ function dataset:__init(...)
       -- iterate over classPaths
       for j,path in ipairs(classPaths[i]) do
          local command = find .. ' "' .. path .. '" ' .. findOptions 
-            .. ' >>"' .. classFindFiles[i] .. '" \n'
+            .. ' | sort -V >>"' .. classFindFiles[i] .. '" \n'
          tmphandle:write(command)
       end
    end
