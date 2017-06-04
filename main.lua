@@ -249,7 +249,7 @@ function trainAndEvaluateAutomatic(modality, numEpochs, evalInterval, paramFacto
   local bestCmEpochLoss = 1e10 -- best cross-modal epoch loss
   while epoch <= numEpochs and count < p.consecutiveStop do
 
-    local epochLoss, cmEpochLoss = doOneEpochOnModality(modality, epoch, false)
+    local epochLoss, cmEpochLoss = doOneEpochOnModality(modality, false)
     if cmEpochLoss < bestCmEpochLoss then
         bestCmEpochLoss = cmEpochLoss
     end

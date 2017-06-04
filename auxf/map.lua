@@ -75,9 +75,11 @@ function calcMAPTest(fromModality, toModality, printToFile) -- TODO: Remove 3rd 
     return mAP
 end
 
-function calcMAP_old(queryCodes, databaseCodes, queryLabels, databaseLabels)
+function calcMAP_old(queryCodes, databaseCodes, queryLabels, databaseLabels, verbose)
 
     K = 50
+
+    incorrectCounts = torch.Tensor(queryLabels:size(2)):fill(0)
 
     -- Q = 1
     Q = queryCodes:size(1)
@@ -109,6 +111,8 @@ function calcMAP_old(queryCodes, databaseCodes, queryLabels, databaseLabels)
             if dotProd > 0 then
                 correct = correct + 1
                 AP = AP + (correct / k) -- add precision component
+            else
+                incorrectCounts:add(kLabel:double())
             end
         end
         if correct > 0 then -- Correct should only be 0 if there are a small # of database objects and/or poorly trained

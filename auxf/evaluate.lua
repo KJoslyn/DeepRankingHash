@@ -93,61 +93,12 @@ end
 -- mAP Functions
 -- /////////////////////////////
 
-local function getClassesAndQuantity(classArg)
+function calcPretrainsetHashCodesForNuswide(modalityChar)
 
-    local classes
-    if type(classArg) == 'string' then
-        classes = {classArg}
-    elseif type(classArg) == 'table' then
-        classes = classArg
-    end
-
-    local quantity = 0
-    local includePretraining = false
-    for c = 1, #classes do
-        local class = classes[c]
-        if class == 'training' then
-            quantity = quantity + d.dataset:sizeTrain()
-        elseif class == 'pretraining' then
-            quantity = quantity + d.dataset:sizePretraining()
-            includePretraining = true
-        elseif class == 'val' then
-            quantity = quantity + d.dataset:sizeVal()
-        elseif class == 'query' then
-            quantity = quantity + d.datatset:sizeTest()
-        end
-    end
-
-    return classes, quantity, includePretraining
-end
-
-function getImageCodesAndLabels(classArg)
-
-    local classes, N, includePretraining = getClassesAndQuantity(classArg)
+    local N = d.dataset:sizePretraining()
 
     local codes = torch.CudaLongTensor(N, p.L)
     local labels = torch.FloatTensor(N, p.numClasses)
-
-    local allData = torch.FloatTensor() -- TODO: Correct?
-    local allLabels = torch.FloatTensor()
-    if not includePretraining then
-        for c = 1, #classes do
-            local catData, catLabels
-            local class = classes[c]
-            if class == 'training' then
-                catData = d.trainset[I].data
-                catLabels = d.trainset[I].label
-            elseif class == 'val' then
-                catData = d.valset[I].data
-                catLabels = d.valset[I].label
-            elseif class == 'query' then
-                catData = d.testset[I].data
-                catLabels = d.testset[I].label
-            end
-            allData = torch.cat(allData, catData, 1)
-            allLabels = torch.cat(allLabels, catLabels, 1)
-        end
-    end
 
     local batchSize = 128
     local numBatches = math.ceil(N / batchSize)
@@ -157,14 +108,7 @@ function getImageCodesAndLabels(classArg)
         local startIndex = batchNum * batchSize + 1
         local endIndex = math.min((batchNum + 1) * batchSize, N)
 
-        local batchData, batchLabels
-        if includePretraining then
-            batchData, batchLabels = d.dataset:getBySplit(classes, 'I', startIndex, endIndex)
-        else
-            batchData = allData[{ {startIndex, endIndex} }]
-            batchLabels = allLabels[{ {startIndex, endIndex} }]
-        end
-
+        local batchData, batchLabels = d.dataset:getBySplit('pretraining', modalityChar, startIndex, endIndex)
         codes[{ {startIndex, endIndex} }] = calcHashCodes(batchData):reshape(endIndex - startIndex + 1, p.L)
         labels[{ {startIndex, endIndex} }] = batchLabels
     end
@@ -172,14 +116,64 @@ function getImageCodesAndLabels(classArg)
     return codes, labels
 end
 
-function getTextCodesAndLabels(classArg)
+function getCodesAndLabelsForModalityAndClass(modality, class, usePrecomputedCodes)
 
-    local classes, quantity, includePretraining = getClassesAndQuantity(classArg)
+    if class == 'pretraining' and p.datasetType == 'nus' then
+        return calcPretrainsetHashCodesForNuswide(modalityChar)
+    end
 
-    local tags, labels = d.dataset:getBySplit(classes, 'X', 1, quantity)
-    local codes = calcHashCodes(tags):reshape(quantity, p.L)
+    local split, modalityChar
+    if class == 'pretraining' then
+        split = d.pretrainset
+        if modality == I then
+            modalityChar = 'I'
+        else
+            modalityChar = 'X'
+        end
+    elseif class == 'training' then
+        split = d.trainset
+    elseif class == 'val' then
+        split = d.valset
+    elseif class == 'query' then
+        split = d.testset
+    end
+    split = split[modality]
 
-    return codes, labels
+    if usePrecomputedCodes and split.codes then
+        return split.codes, split.label
+    elseif class == 'pretraining' and not d.pretrainset[modality].data then -- assumes p.datasetType == 'mir'
+        d.pretrainset[modality].data, d.pretrainset[modality].label = d.dataset:getBySplit('pretraining', modalityChar, 1, d.dataset:sizePretraining())
+    end
+    local data = split.data
+
+    -- Compute and save the computed hash codes
+    split.codes = getHashCodes(data):reshape(data:size(1), p.L) -- TODO: Check if this works
+
+    return split.codes, split.label
+end
+
+function getCodesAndLabels(modality, classArg, usePrecomputedCodes)
+
+    local classes
+    if type(classArg) == 'string' then
+        classes = {classArg}
+    elseif type(classArg) == 'table' then
+        classes = classArg
+    end
+    -- local codes = torch.CudaLongTensor(N, p.L)
+    -- local labels = torch.FloatTensor(N, p.numClasses)
+
+    -- local allData = torch.FloatTensor() -- TODO: Correct?
+    local allCodes = torch.CudaLongTensor()
+    local allLabels = torch.FloatTensor()
+    for c = 1, #classes do
+        local class = classes[c]
+        local catCodes, catLabels = getCodesAndLabelsForModalityAndClass(modality, class, usePrecomputedCodes)
+        allCodes = torch.cat(allCodes, catCodes, 1)
+        allLabels = torch.cat(allLabels, catLabels, 1)
+    end
+
+    return allCodes, allLabels
 end
 
 function getDistanceAndSimilarityForMAP(queryCodes, databaseCodes, queryLabels, databaseLabels)
@@ -216,18 +210,12 @@ function saveDistAndSimToMatFile(D,S)
     matio.save(g.snapshotDir .. '/DS_data_' .. dateStr .. '.mat', {D=D_new,S=S_new})
 end
 
-function calcMAP(modalityFrom, modalityTo, classesFrom, classesTo)
+function calcMAP(modalityFrom, modalityTo, classesFrom, classesTo, usePrecomputedCodes)
 
     m.fullModel:evaluate()
 
-    local queryCodes, queryLabels, dbCodes, dbLabels
-    if modalityFrom == I then
-        queryCodes, queryLabels = getImageCodesAndLabels(classesFrom)
-        dbCodes, dbLabels = getTextCodesAndLabels(classesTo)
-    else
-        queryCodes, queryLabels = getTextCodesAndLabels(classesFrom)
-        dbCodes, dbLabels = getImageCodesAndLabels(classesTo)
-    end
+    local queryCodes, queryLabels = getCodesAndLabels(modalityFrom, classesFrom, usePrecomputedCodes)
+    local dbCodes, dbLabels = getCodesAndLabels(modalityTo, classesTo, usePrecomputedCodes)
 
     if saveToMatFile then
         local D, S = getDistanceAndSimilarityForMAP(queryCodes, dbCodes, queryLabels, dbLabels)
@@ -354,6 +342,120 @@ function calcAndPrintHammingAccuracy(trainBatch, similarity_target, statsFile)
         numCorrect = torch.eq(similarity, similarity_target):sum()
         statsPrint(string.format("Accuracy%d = %.2f", i, numCorrect*100 / s), statsFile)
     end
+end
+
+local function normalizePlotLine(line)
+
+    local norm = line / line:max()
+    return norm
+end
+
+local function getPlotLines(epoch)
+
+    if not g.plotStartEpoch then
+        g.plotStartEpoch = epoch
+    end
+
+    local elapsedEpochs = epoch - (g.plotStartEpoch - 1) -- startEpoch should be one greater than a multiple of g.plotNumEpochs
+
+    local x = torch.linspace(g.plotStartEpoch, epoch, elapsedEpochs)
+    local y_loss = normalizePlotLine(g.y_loss)
+    local y_cross = normalizePlotLine(g.y_cross)
+    local y_b1 = normalizePlotLine(g.y_b1)
+    local y_b2 = normalizePlotLine(g.y_b2)
+    local y_q1 = normalizePlotLine(g.y_q1)
+    local y_q2 = normalizePlotLine(g.y_q2)
+    local y_ixt = g.y_ixt
+    local y_xit = g.y_xit
+    local y_ixv = g.y_ixv
+    local y_xiv = g.y_xiv
+
+    local lines = {}
+    local bw = m.criterion.weights[2]
+    local qw = m.criterion.weights[4]
+    
+    if bw > 0 or qw > 0 then
+        lines[#lines + 1] = {x,y_loss, 'with lines ls 1 lc rgb \'black\''}
+    end
+    lines[#lines + 1] = {x,y_cross, 'with lines ls 1 lc rgb \'blue\''}
+    if bw > 0 then
+        local y_bavg = (y_b1 + y_b2) / 2
+        -- lines[#lines + 1] = {x,y_b1, 'with lines ls 2 lc rgb \'green\''}
+        -- lines[#lines + 1] = {x,y_b2, 'with lines ls 2 lc rgb \'purple\''}
+        lines[#lines + 1] = {x,y_bavg, 'with lines ls 2 lc rgb \'yellow\''}
+    end
+    if qw > 0 then
+        lines[#lines + 1] = {x,y_q1, 'with lines ls 1 lc rgb \'red\''}
+        lines[#lines + 1] = {x,y_q2, 'with lines ls 1 lc rgb \'orange\''}
+    end
+    if y_ixt:dim() > 0 then
+        lines[#lines + 1] = {x,y_ixt, 'with lines ls 2 lc rgb \'blue\''}
+        lines[#lines + 1] = {x,y_xit, 'with lines ls 2 lc rgb \'green\''}
+        lines[#lines + 1] = {x,y_ixv, 'with lines ls 2 lc rgb \'purple\''}
+        lines[#lines + 1] = {x,y_xiv, 'with lines ls 2 lc rgb \'red\''}
+    end
+
+    return lines
+end
+
+function plotCrossModalLoss(epoch)
+
+    local lines = getPlotLines(epoch)
+
+    if not g.plotFilename then
+        local date = os.date("*t", os.time())
+        local dateStr = date.month .. "_" .. date.day .. "_" .. date.hour .. "_" .. date.min
+        g.plotFilename = g.snapshotDir .. '/' .. dateStr .. '_' .. 'CMplot.pdf' 
+    end
+
+    gnuplot.pdffigure(g.plotFilename)
+
+    gnuplot.plot(unpack(lines))
+
+    gnuplot.raw('set style line 2 dashtype 2')
+
+    gnuplot.plotflush()
+end
+
+function plotCrossModalLoss_old(epoch)
+
+    if not g.plotStartEpoch then
+        g.plotStartEpoch = epoch
+    end
+
+    local elapsedEpochs = epoch - (g.plotStartEpoch - 1) -- startEpoch should be one greater than a multiple of g.plotNumEpochs
+
+    local x = torch.linspace(g.plotStartEpoch, epoch, elapsedEpochs)
+    local y_loss = g.y_loss
+    local y_ixt = g.y_ixt
+    local y_xit = g.y_xit
+    local y_ixv = g.y_ixv
+    local y_xiv = g.y_xiv
+
+    if not g.plotFilename then
+        local date = os.date("*t", os.time())
+        local dateStr = date.month .. "_" .. date.day .. "_" .. date.hour .. "_" .. date.min
+        g.plotFilename = g.snapshotDir .. '/' .. dateStr .. '_' .. 'CMplot.pdf' 
+    end
+
+    gnuplot.pdffigure(g.plotFilename)
+
+    if y_ixt:dim() == 0 then
+        gnuplot.plot({x,y_loss, 'with lines ls 1 lc rgb \'black\''})
+    else
+        gnuplot.plot({x,y_loss, 'with lines ls 1 lc rgb \'black\''},
+                    {x,y_cross, 'with lines ls 1 lc rgb \'blue\''},
+                    {x,y_b1, 'with lines ls 1 lc rgb \'green\''},
+                    {x,y_b2, 'with lines ls 1 lc rgb \'purple\''},
+                    {x,y_q1, 'with lines ls 1 lc rgb \'red\''},
+                    {x,y_q2, 'with lines ls 1 lc rgb \'orange\''},
+                    {x,y_ixt, 'with lines ls 1 lc rgb \'blue\''},
+                    {x,y_xit, 'with lines ls 1 lc rgb \'green\''},
+                    {x,y_ixv, 'with lines ls 1 lc rgb \'purple\''},
+                    {x,y_xiv, 'with lines ls 1 lc rgb \'red\''})
+    end
+
+    gnuplot.plotflush()
 end
 
 function plotClassAccAndLoss(epoch, plotLoss)

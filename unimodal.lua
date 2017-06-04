@@ -4,15 +4,15 @@
 -- loadPackagesAndModel(datasetType, modality) -- 'mir' or 'nus', 'I', or 'X'
 -- loadData() -- uses dataLoader.lua
 -- optional: loadModelSnapshot -- from createModel.lua
--- trainAndEvaluate()
+-- trainAndEvaluate(numEpochs, batchSize)
 -- /////////////////////////////////////////
 
-local function doSetLRForLayer(layerIdx, newLRMult)
+function doSetLRForLayer(layerIdx, newLRMult)
     m.classifier:get(layerIdx):learningRate('weight', newLRMult)
     m.classifier:get(layerIdx):learningRate('bias', newLRMult)
 end
 
-local function doSetWDForLayer(layerIdx, newWDMult)
+function doSetWDForLayer(layerIdx, newWDMult)
     m.classifier:get(layerIdx):weightDecay('weight', newWDMult)
     m.classifier:get(layerIdx):weightDecay('bias', newWDMult)
 end
@@ -44,8 +44,8 @@ local function doChangeLRAndWDForLayer(layerName, newLR, newWD)
     -- This still needs a call to setOptimStateLRAndWD to be complete
 end
 
-local function setOptimStateLRAndWD(newLR, newWD)
-    local learningRates, weightDecays = m.classifier:getOptimConfig(p.baseLearningRate, p.baseWeightDecay)
+function setOptimStateLRAndWD(newLR, newWD)
+    local learningRates, weightDecays = m.classifier:getOptimConfig(newLR or p.baseLearningRate, newWD or p.baseWeightDecay)
     g.optimState.learningRates = learningRates
     g.optimState.weightDecays = weightDecays
 end
@@ -55,7 +55,7 @@ function changeLRAndWDForLayer(layerName, newLR, newWD)
     setOptimStateLRAndWD(p.baseLearningRate, p.baseWeightDecay)
 end
 
-function loadPackagesAndModel(datasetType, modality, baseLearningRate, baseWeightDecay)
+function loadPackagesAndModel(datasetType, modality, baseLearningRate, baseWeightDecay, mom)
 
     require 'nn'
     require 'optim'
@@ -151,7 +151,7 @@ function loadPackagesAndModel(datasetType, modality, baseLearningRate, baseWeigh
     p.lastLayerWeightDecay =  1 -- .02
 
     p.baseLearningRateDecay = 0
-    p.baseMomentum = 0.9
+    p.baseMomentum = mom or 0.9
 
     g.optimState = {
         learningRate = p.baseLearningRate,
