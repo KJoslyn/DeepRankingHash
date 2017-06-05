@@ -1,7 +1,10 @@
 -- //////////////////////////////////////////
 -- Typical flow:
 -- require 'unimodal'
--- loadPackagesAndModel(datasetType, modality) -- 'mir' or 'nus', 'I', or 'X'
+-- loadParamsAndPackages(datasetType, modality) -- 'mir' or 'nus', 'I', or 'X'
+-- resetPlotStats()
+-- loadVariableTrainingParams(baseLearningRate, baseWeightDecay, baseLearningRateDecay, mom)
+-- loadModel()
 -- loadData() -- uses dataLoader.lua
 -- optional: loadModelSnapshot -- from createModel.lua
 -- trainAndEvaluate(numEpochs, batchSize)
@@ -55,7 +58,7 @@ function changeLRAndWDForLayer(layerName, newLR, newWD)
     setOptimStateLRAndWD(p.baseLearningRate, p.baseWeightDecay)
 end
 
-function loadPackagesAndModel(datasetType, modality, baseLearningRate, baseWeightDecay, mom)
+function loadParamsAndPackages(datasetType, modality, plotNumEpochs)
 
     require 'nn'
     require 'optim'
@@ -87,11 +90,13 @@ function loadPackagesAndModel(datasetType, modality, baseLearningRate, baseWeigh
         p.tagDim = 1075
         snapshotDatasetDir = '/mirflickr'
         g.datasetPath = '/home/kjoslyn/datasets/mirflickr/'
+        g.evalTrainAccEpochs = 5
     elseif datasetType == 'nus' then
         p.numClasses = 21
         p.tagDim = 1000
         snapshotDatasetDir = '/nuswide'
         g.datasetPath = '/home/kjoslyn/datasets/nuswide/'
+        g.evalTrainAccEpochs = 1
     else
         print("Error: Unrecognized datasetType!! Should be mir or nus")
     end
@@ -103,30 +108,26 @@ function loadPackagesAndModel(datasetType, modality, baseLearningRate, baseWeigh
 
     g.numEpochsCompleted = 0
 
-    if datasetType == 'nus' and modality == 'I' then
+    if plotNumEpochs then
+        g.plotNumEpochs = plotNumEpochs
+    elseif datasetType == 'nus' and modality == 'I' then
         g.plotNumEpochs = 1
     else
         g.plotNumEpochs = 5
     end
 
-    -- //////////// Load image / text model
-    if modality == 'I' then
-    --    m.classifier = getImageModel()
-       m.classifier = getImageModelImageNetPretrained(1e3)
-       m.imageClassifier = m.classifier
-       if datasetType == 'nus' then
-          g.evalTrainAccEpochs = 1
-       else
-          g.evalTrainAccEpochs = 5
-       end
-    elseif modality == 'X' then
-       m.classifier = getUntrainedTextModel()
-       m.textClassifier = m.classifier
-       g.evalTrainAccEpochs = 10
-    else
-       print('Error in unimodal.lua: Unrecognized modality')
+    if p.modality == 'X' then
+        g.evalTrainAccEpochs = 10
     end
 
+    p.topLearningRate = 0.01
+    p.lastLayerLearningRate = 0.1
+
+    p.topWeightDecay =  1 -- .01
+    p.lastLayerWeightDecay =  1 -- .02
+end
+
+function resetPlotStats()
     g.accIdx = 0
     g.pastNAcc = torch.Tensor(g.plotNumEpochs)
     g.avgDataAcc = torch.Tensor()
@@ -136,28 +137,48 @@ function loadPackagesAndModel(datasetType, modality, baseLearningRate, baseWeigh
     g.avgDataLoss = torch.Tensor()
     g.maxDataLoss = torch.Tensor()
     g.minDataLoss = torch.Tensor()
+end
 
+function loadVariableTrainingParams(baseLearningRate, baseWeightDecay, baseLearningRateDecay, mom)
+
+    -- //////////// Set training params
     -- TODO: Fix image-text disparity
-    if modality == 'I' then
+    -- LearningRate
+    if p.modality == 'I' then
         p.baseLearningRate = baseLearningRate or 1e-4
     else
         p.baseLearningRate = baseLearningRate or .1
     end
-    p.topLearningRate = 0.01
-    p.lastLayerLearningRate = 0.1
 
+    -- WeightDecay
     p.baseWeightDecay = baseWeightDecay or 0 -- 1e-4
-    p.topWeightDecay =  1 -- .01
-    p.lastLayerWeightDecay =  1 -- .02
 
-    p.baseLearningRateDecay = 0
+    -- LearningRateDecay
+    p.baseLearningRateDecay = baseLearningRateDecay or 0
+
+    -- Momentum
     p.baseMomentum = mom or 0.9
+end
+
+function loadModel()
 
     g.optimState = {
         learningRate = p.baseLearningRate,
         learningRateDecay = p.baseLearningRateDecay,
         momentum = p.baseMomentum
     }
+
+    -- //////////// Load image / text model
+    if p.modality == 'I' then
+    --    m.classifier = getImageModel()
+       m.classifier = getImageModelImageNetPretrained(1e3)
+       m.imageClassifier = m.classifier
+    elseif p.modality == 'X' then
+       m.classifier = getUntrainedTextModel(p.layerSizes) -- p.layerSizes would be set in mainUni.lua
+       m.textClassifier = m.classifier
+    else
+       print('Error in unimodal.lua: Unrecognized modality')
+    end
 
     if p.modality == 'I' then
         doChangeLRAndWDForLayer('top', p.topLearningRate, p.topWeightDecay)
@@ -349,17 +370,17 @@ function trainAndEvaluate(numEpochs, batchSize, lr, mom, wd)
         collectgarbage()
         m.classifier:evaluate()
         avgLoss = totalLoss / numBatches
-        print("Epoch " .. epoch .. ": avg loss = " .. avgLoss)
+        statsPrint("Epoch " .. epoch .. ": avg loss = " .. avgLoss, g.sf)
         avgNumIncorrect = totNumIncorrect / Ntrain
-        print("Epoch " .. epoch .. ": avg num incorrect = " .. avgNumIncorrect)
+        statsPrint("Epoch " .. epoch .. ": avg num incorrect = " .. avgNumIncorrect, g.sf)
         local valClassAcc
         if d.valset then
             valClassAcc = getClassAccuracy(d.valset.data, d.valset.label:cuda())
-            print(string.format("Epoch %d: Val set class accuracy = %.2f", epoch, valClassAcc))
+            statsPrint(string.format("Epoch %d: Val set class accuracy = %.2f", epoch, valClassAcc), g.sf)
         end
         if d.trainset and epoch % g.evalTrainAccEpochs == 0 then
             local trainClassAcc = getClassAccuracy(d.trainset.data, d.trainset.label:cuda())
-            print(string.format("Epoch %d: Train set class accuracy = %.2f", epoch, trainClassAcc))
+            statsPrint(string.format("Epoch %d: Train set class accuracy = %.2f", epoch, trainClassAcc), g.sf)
         end
         print(string.format('Epoch time: %.2f seconds\n', epochTimer:time().real))
         m.classifier:training()
@@ -374,7 +395,9 @@ function trainAndEvaluate(numEpochs, batchSize, lr, mom, wd)
             g.avgDataLoss = g.avgDataLoss:cat(torch.Tensor({g.pastNLoss:mean()}))
             g.maxDataLoss = g.maxDataLoss:cat(torch.Tensor({g.pastNLoss:max()}))
             g.minDataLoss = g.minDataLoss:cat(torch.Tensor({g.pastNLoss:min()}))
-            plotClassAccAndLoss(epoch, true)
+            if not g.skipPlot then
+                plotClassAccAndLoss(epoch, true)
+            end
             g.accIdx = 0
         end
 

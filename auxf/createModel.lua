@@ -134,7 +134,71 @@ function getImageModelForFullNet(L, k, type, lrMultForHashLayer)
     return createClassifierAndHasher(model, 4096, L, k, type, lrMultForHashLayer)
 end
 
-function getUntrainedTextModel()
+function table.shallow_copy(t)
+  local t2 = {}
+  for k,v in pairs(t) do
+    t2[k] = v
+  end
+  return t2
+end
+
+function buildCustomTextModel(layerSizes)
+
+    local model = nn.Sequential()
+
+    local ls = table.shallow_copy(layerSizes)
+
+    ls[#ls + 1] = p.numClasses
+
+    -- { t, 2048 } is basic (2 hidden layers)
+    -- p.tagDim -> p.tagDim (t)
+    -- p.tagDim -> 2048     (2048)
+    -- 2048 -> p.numClasses [Assumed]
+
+    local lprev
+    for i = 1, #ls do
+        local from, to
+        if i == 1 then
+            from = p.tagDim
+        else
+            from = lprev 
+        end
+
+        local lt = ls[i]
+        if lt == 't' then
+            to = p.tagDim
+        else
+            to = lt
+        end
+
+        if i ~= 1 then
+            model:add(cudnn.ReLU(true))
+            model:add(nn.Dropout(0.500000))
+        end
+
+        local weightInit
+        if not p.weightInit or p.weightInit == 'xavier' then
+            weightInit = nninit.xavier
+        elseif p.weightInit == 'kaiming' then
+            weightInit = nninit.kaiming
+        else
+            print('Error: Unrecognized weight initialization scheme')
+        end
+
+        -- model:add(nn.Linear(from, to):init('weight', nninit.xavier, {dist = 'normal', gain = 'relu'}))
+        model:add(nn.Linear(from, to):init('weight', weightInit, {dist = 'normal', gain = 'relu'}))
+
+        lprev = to
+    end
+
+    model:add(nn.Sigmoid())
+    
+    model = model:cuda()
+
+    return model
+end
+
+function doGetBasicTextModel()
 
     local model = nn.Sequential()
     -- model.add(nn.View(-1):setNumInputDims(3))
@@ -144,17 +208,7 @@ function getUntrainedTextModel()
     model:add(nn.Linear(p.tagDim, 2048):init('weight', nninit.xavier, {dist = 'normal', gain = 'relu'}))
     model:add(cudnn.ReLU(true))
     model:add(nn.Dropout(0.500000))
-    -- model:add(nn.Linear(2048, p.numClasses):init('weight', nninit.xavier, {dist = 'normal', gain = 'sigmoid'}))
-
-    -- model:add(nn.Linear(2048, 2048):init('weight', nninit.xavier, {dist = 'normal', gain = 'relu'}))
-    -- model:add(cudnn.ReLU(true))
-    -- model:add(nn.Dropout(0.500000))
-
-    model:add(nn.Linear(2048, 1024):init('weight', nninit.xavier, {dist = 'normal', gain = 'relu'}))
-    model:add(cudnn.ReLU(true))
-    model:add(nn.Dropout(0.500000))
-    model:add(nn.Linear(1024, p.numClasses):init('weight', nninit.xavier, {dist = 'normal', gain = 'sigmoid'}))
-
+    model:add(nn.Linear(2048, p.numClasses):init('weight', nninit.xavier, {dist = 'normal', gain = 'sigmoid'}))
 
     model:add(nn.Sigmoid())
     
@@ -163,28 +217,13 @@ function getUntrainedTextModel()
     return model
 end
 
-function getUntrainedTextModelTanh()
+function getUntrainedTextModel(layerSizes)
 
-    local model = nn.Sequential()
-    -- model.add(nn.View(-1):setNumInputDims(3))
-    model:add(nn.Linear(p.tagDim, p.tagDim):init('weight', nninit.xavier, {dist = 'normal', gain = 'tanh'}))
-    model:add(cudnn.Tanh(true))
-    model:add(nn.Dropout(0.500000))
-    model:add(nn.Linear(p.tagDim, 2048):init('weight', nninit.xavier, {dist = 'normal', gain = 'tanh'}))
-    model:add(cudnn.Tanh(true))
-    model:add(nn.Dropout(0.500000))
-
-    -- model:add(nn.Linear(2048, 2048):init('weight', nninit.xavier, {dist = 'normal', gain = 'relu'}))
-    -- model:add(cudnn.ReLU(true))
-    -- model:add(nn.Dropout(0.500000))
-
-    model:add(nn.Linear(2048, p.numClasses):init('weight', nninit.xavier, {dist = 'normal', gain = 'sigmoid'}))
-
-    model:add(nn.Sigmoid())
-    
-    model = model:cuda()
-
-    return model
+    if not layerSizes then
+        return doGetBasicTextModel()
+    else
+        return buildCustomTextModel(layerSizes)
+    end
 end
 
 function getMirflickrCaffeTrainedTextModel()
