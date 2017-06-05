@@ -463,15 +463,15 @@ function plotClassAccAndLoss(epoch, plotLoss)
     if elapsedEpochs / g.plotNumEpochs > 1 then
         local x = torch.linspace(g.plotStartEpoch + g.plotNumEpochs - 1, epoch, elapsedEpochs / g.plotNumEpochs)
 
-        local y = g.avgDataAcc
-        local yh = g.maxDataAcc
-        local yl = g.minDataAcc
+        local y = s.avgDataAcc
+        local yh = s.maxDataAcc
+        local yl = s.minDataAcc
         local yy = torch.cat(x,yh,2)
         local yy = torch.cat(yy,yl,2)
 
-        local y2 = g.avgDataLoss
-        local yh2 = g.maxDataLoss
-        local yl2 = g.minDataLoss
+        local y2 = s.avgDataLoss
+        local yh2 = s.maxDataLoss
+        local yl2 = s.minDataLoss
         local yy2 = torch.cat(x, yh2, 2)
         local yy2 = torch.cat(yy2, yl2, 2)
 

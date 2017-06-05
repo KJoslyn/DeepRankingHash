@@ -2,9 +2,9 @@
 -- Typical flow:
 -- require 'unimodal'
 -- loadParamsAndPackages(datasetType, modality) -- 'mir' or 'nus', 'I', or 'X'
--- resetPlotStats()
+-- resetGlobals()
 -- loadVariableTrainingParams(baseLearningRate, baseWeightDecay, baseLearningRateDecay, mom)
--- loadModel()
+-- loadModelAndOptimState()
 -- loadData() -- uses dataLoader.lua
 -- optional: loadModelSnapshot -- from createModel.lua
 -- trainAndEvaluate(numEpochs, batchSize)
@@ -49,8 +49,8 @@ end
 
 function setOptimStateLRAndWD(newLR, newWD)
     local learningRates, weightDecays = m.classifier:getOptimConfig(newLR or p.baseLearningRate, newWD or p.baseWeightDecay)
-    g.optimState.learningRates = learningRates
-    g.optimState.weightDecays = weightDecays
+    o.optimState.learningRates = learningRates
+    o.optimState.weightDecays = weightDecays
 end
 
 function changeLRAndWDForLayer(layerName, newLR, newWD)
@@ -81,6 +81,7 @@ function loadParamsAndPackages(datasetType, modality, plotNumEpochs)
     m = {} -- models
     g = {} -- other global variables
     o = {} -- optimStates and model parameters
+    s = {} -- stats for plotting
 
     matio = require 'matio'
 
@@ -106,8 +107,6 @@ function loadParamsAndPackages(datasetType, modality, plotNumEpochs)
 
     g.snapshotDir = '/home/kjoslyn/kevin/Project/snapshots' .. snapshotDatasetDir
 
-    g.numEpochsCompleted = 0
-
     if plotNumEpochs then
         g.plotNumEpochs = plotNumEpochs
     elseif datasetType == 'nus' and modality == 'I' then
@@ -127,21 +126,23 @@ function loadParamsAndPackages(datasetType, modality, plotNumEpochs)
     p.lastLayerWeightDecay =  1 -- .02
 end
 
-function resetPlotStats()
-    g.accIdx = 0
-    g.pastNAcc = torch.Tensor(g.plotNumEpochs)
-    g.avgDataAcc = torch.Tensor()
-    g.maxDataAcc = torch.Tensor()
-    g.minDataAcc = torch.Tensor()
-    g.pastNLoss = torch.Tensor(g.plotNumEpochs)
-    g.avgDataLoss = torch.Tensor()
-    g.maxDataLoss = torch.Tensor()
-    g.minDataLoss = torch.Tensor()
+function resetGlobals()
+    s.accIdx = 0
+    s.pastNAcc = torch.Tensor(g.plotNumEpochs)
+    s.avgDataAcc = torch.Tensor()
+    s.maxDataAcc = torch.Tensor()
+    s.minDataAcc = torch.Tensor()
+    s.pastNLoss = torch.Tensor(g.plotNumEpochs)
+    s.avgDataLoss = torch.Tensor()
+    s.maxDataLoss = torch.Tensor()
+    s.minDataLoss = torch.Tensor()
+    g.plotStartEpoch = 1
+    g.numEpochsCompleted = 0
 end
 
 function loadVariableTrainingParams(baseLearningRate, baseWeightDecay, baseLearningRateDecay, mom)
 
-    -- //////////// Set training params
+    -- //////////// Set training params - NOT USED IN mainUni.lua
     -- TODO: Fix image-text disparity
     -- LearningRate
     if p.modality == 'I' then
@@ -160,13 +161,7 @@ function loadVariableTrainingParams(baseLearningRate, baseWeightDecay, baseLearn
     p.baseMomentum = mom or 0.9
 end
 
-function loadModel()
-
-    g.optimState = {
-        learningRate = p.baseLearningRate,
-        learningRateDecay = p.baseLearningRateDecay,
-        momentum = p.baseMomentum
-    }
+function loadModelAndOptimState()
 
     -- //////////// Load image / text model
     if p.modality == 'I' then
@@ -180,11 +175,27 @@ function loadModel()
        print('Error in unimodal.lua: Unrecognized modality')
     end
 
+    o.optimState = {
+        learningRate = p.baseLearningRate,
+        learningRateDecay = p.baseLearningRateDecay,
+        momentum = p.baseMomentum
+    }
+
     if p.modality == 'I' then
         doChangeLRAndWDForLayer('top', p.topLearningRate, p.topWeightDecay)
         doChangeLRAndWDForLayer('last', p.lastLayerLearningRate, p.lastLayerWeightDecay)
     end
     setOptimStateLRAndWD(p.baseLearningRate, p.baseWeightDecay)
+
+    o.params, o.gradParams = m.classifier:getParameters() 
+
+    -- criterion = nn.MultiLabelSoftMarginCriterion()
+    -- criterion = nn.MSECriterion()
+    criterion = nn.BCECriterion()
+    if p.modality == 'I' or p.noSizeAverage then
+        criterion.sizeAverage = false -- TODO: Why does this work better for image modality?
+    end
+    criterion = criterion:cuda()
 end
 
 function doGetBatchFromMemory(startIndex, endIndex, perm)
@@ -272,9 +283,138 @@ function loadData(small)
     collectgarbage()
 end
 
+function doOneEpoch()
+
+    local params = o.params
+    local gradParams = o.gradParams
+    local optimState = o.optimState
+
+    m.classifier:training()
+
+    if not g.epochTimer then
+        g.epochTimer = torch.Timer()
+    end
+
+    g.epochTimer:reset()
+    g.epochTimer:resume()
+    -- shuffle at each epoch
+    perm = torch.randperm(Ntrain):long()
+    totalLoss = 0
+    totNumIncorrect = 0
+
+    local numBatches = math.ceil(Ntrain / p.batchSize)
+
+    for batchNum = 0, numBatches - 1 do
+
+        trainBatch = getBatch(batchNum, p.batchSize, perm)
+        collectgarbage()
+
+        function feval(x)
+            -- get new parameters
+            if x ~= params then
+                params:copy(x)
+            end
+
+            gradParams:zero()
+
+            outputs = m.classifier:forward(trainBatch.data)
+            local loss = criterion:forward(outputs, trainBatch.label)
+
+            local roundedOutput = torch.CudaTensor(outputs:size(1), p.numClasses):copy(outputs):round()
+            totNumIncorrect = totNumIncorrect + torch.ne(roundedOutput, trainBatch.label):sum()
+            -- local numOnes = roundedOutput:sum()
+
+            local dloss_doutputs = criterion:backward(outputs, trainBatch.label)
+            m.classifier:backward(trainBatch.data, dloss_doutputs)
+
+            if p.modality == 'I' or p.noSizeAverage then
+                local inputSize = trainBatch.data:size(1)
+                gradParams:div(inputSize)
+                loss = loss/inputSize
+            end
+            totalLoss = totalLoss + loss
+
+            return loss, gradParams
+        end
+        optim.sgd(feval, params, optimState)
+
+        -- collectgarbage()
+    end
+    g.epochTimer:stop()
+
+    g.numEpochsCompleted = g.numEpochsCompleted + 1
+
+    local epoch = g.numEpochsCompleted
+
+    collectgarbage()
+    m.classifier:evaluate()
+    avgLoss = totalLoss / numBatches
+    statsPrint("Epoch " .. epoch .. ": avg loss = " .. avgLoss, g.sf)
+    avgNumIncorrect = totNumIncorrect / Ntrain
+    statsPrint("Epoch " .. epoch .. ": avg num incorrect = " .. avgNumIncorrect, g.sf)
+    local valClassAcc
+    if d.valset then
+        valClassAcc = getClassAccuracy(d.valset.data, d.valset.label:cuda())
+        statsPrint(string.format("Epoch %d: Val set class accuracy = %.2f", epoch, valClassAcc), g.sf)
+    end
+    if d.trainset and epoch % g.evalTrainAccEpochs == 0 then
+        local trainClassAcc = getClassAccuracy(d.trainset.data, d.trainset.label:cuda())
+        statsPrint(string.format("Epoch %d: Train set class accuracy = %.2f", epoch, trainClassAcc), g.sf)
+    end
+    print(string.format('Epoch time: %.2f seconds\n', g.epochTimer:time().real))
+    m.classifier:training()
+
+    s.accIdx = s.accIdx + 1
+    s.pastNAcc[s.accIdx] = valClassAcc
+    s.pastNLoss[s.accIdx] = math.min(avgLoss * 100, 100) -- Scale loss to fit in the same y axes as accuracy
+    if s.accIdx % g.plotNumEpochs == 0 then
+        s.avgDataAcc = s.avgDataAcc:cat(torch.Tensor({s.pastNAcc:mean()}))
+        s.maxDataAcc = s.maxDataAcc:cat(torch.Tensor({s.pastNAcc:max()}))
+        s.minDataAcc = s.minDataAcc:cat(torch.Tensor({s.pastNAcc:min()}))
+        s.avgDataLoss = s.avgDataLoss:cat(torch.Tensor({s.pastNLoss:mean()}))
+        s.maxDataLoss = s.maxDataLoss:cat(torch.Tensor({s.pastNLoss:max()}))
+        s.minDataLoss = s.minDataLoss:cat(torch.Tensor({s.pastNLoss:min()}))
+        if not g.skipPlot then
+            -- TODO: I'm not sure how to make this work again
+            -- if not g.plotStartEpoch then
+            --     g.plotStartEpoch = epoch
+            -- end
+            plotClassAccAndLoss(epoch, true)
+        end
+        s.accIdx = 0
+    end
+
+    local save
+    if p.modality == 'I' then
+        save = epoch % 10 == 0
+    else
+        save = epoch == 10 or epoch == 200 or epoch == 300 or epoch == 500 or epoch == 750 or epoch == 900 or epoch == 1000
+    end
+
+    if save then
+    -- if epoch == 300 or epoch == 500 or epoch == 750 or epoch == 900 or epoch == 1000 then
+        local snapshotFilename
+        if g.snapshotFilename then
+            snapshotFilename = g.snapshotFilename
+        else
+            local date = os.date("*t", os.time())
+            snapshotFilename = date.month .. "_" .. date.day .. "_" .. date.hour .. "_" .. date.min
+        end
+        snapshotFilename = snapshotFilename .. '_snapshot_epoch_' .. epoch
+        saveSnapshot(snapshotFilename)
+    end
+
+    return avgLoss, valClassAcc
+end
+
 function trainAndEvaluate(numEpochs, batchSize, lr, mom, wd)
 
-    local batchSize = batchSize or p.batchSize
+    -- ///////////////////////
+    -- This section that uses the input parameters is not used in mainUni.lua since it sets the parameters
+    -- before the run
+    if batchSize then
+        p.batchSize = batchSize
+    end
 
     -- lr and wd parameters should only be used when not setting different learning rates for different layers
     -- (i.e. text modality)
@@ -284,138 +424,12 @@ function trainAndEvaluate(numEpochs, batchSize, lr, mom, wd)
         setOptimStateLRAndWD(lr, wd)
     end
     if mom then
-        g.optimState.momentum = mom
+        o.optimState.momentum = mom
     end
+    -- /////////////////////////
 
-    local startEpoch = g.numEpochsCompleted + 1
-
-    if not g.plotStartEpoch then
-        g.plotStartEpoch = startEpoch
-    end
-
-    -- criterion = nn.MultiLabelSoftMarginCriterion()
-    -- criterion = nn.MSECriterion()
-    criterion = nn.BCECriterion()
-    if p.modality == 'I' or p.noSizeAverage then
-        criterion.sizeAverage = false -- TODO: Why does this work better for image modality?
-    end
-    criterion = criterion:cuda()
-
-    local params, gradParams = m.classifier:getParameters()
-
-    -- g.optimState.learningRate = learningRate
-
-    -- local optimState = {
-    --     learningRate = learningRate, -- .01 works for mirflickr
-    --     -- learningRateDecay = 1e-7
-    --     -- learningRate = 1e-3,
-    --     -- learningRateDecay = 1e-4,
-    --     weightDecay = weightDecay, -- .01?
-    --     momentum = momentum -- 0.9?
-    -- }
-
-    numBatches = math.ceil(Ntrain / batchSize)
-
-    m.classifier:training()
-
-    local epochTimer = torch.Timer()
-
-    for epoch = startEpoch, startEpoch + numEpochs - 1 do
-
-        epochTimer:reset()
-        epochTimer:resume()
-        -- shuffle at each epoch
-        perm = torch.randperm(Ntrain):long()
-        totalLoss = 0
-        totNumIncorrect = 0
-
-        for batchNum = 0, numBatches - 1 do
-
-            trainBatch = getBatch(batchNum, batchSize, perm)
-            collectgarbage()
-
-            function feval(x)
-                -- get new parameters
-                if x ~= params then
-                    params:copy(x)
-                end
-
-                gradParams:zero()
-
-                outputs = m.classifier:forward(trainBatch.data)
-                local loss = criterion:forward(outputs, trainBatch.label)
-
-                local roundedOutput = torch.CudaTensor(outputs:size(1), p.numClasses):copy(outputs):round()
-                totNumIncorrect = totNumIncorrect + torch.ne(roundedOutput, trainBatch.label):sum()
-                -- local numOnes = roundedOutput:sum()
-
-                local dloss_doutputs = criterion:backward(outputs, trainBatch.label)
-                m.classifier:backward(trainBatch.data, dloss_doutputs)
-
-                if p.modality == 'I' or p.noSizeAverage then
-                    local inputSize = trainBatch.data:size(1)
-                    gradParams:div(inputSize)
-                    loss = loss/inputSize
-                end
-                totalLoss = totalLoss + loss
-
-                return loss, gradParams
-            end
-            optim.sgd(feval, params, g.optimState)
-
-            -- collectgarbage()
-        end
-        epochTimer:stop()
-
-        collectgarbage()
-        m.classifier:evaluate()
-        avgLoss = totalLoss / numBatches
-        statsPrint("Epoch " .. epoch .. ": avg loss = " .. avgLoss, g.sf)
-        avgNumIncorrect = totNumIncorrect / Ntrain
-        statsPrint("Epoch " .. epoch .. ": avg num incorrect = " .. avgNumIncorrect, g.sf)
-        local valClassAcc
-        if d.valset then
-            valClassAcc = getClassAccuracy(d.valset.data, d.valset.label:cuda())
-            statsPrint(string.format("Epoch %d: Val set class accuracy = %.2f", epoch, valClassAcc), g.sf)
-        end
-        if d.trainset and epoch % g.evalTrainAccEpochs == 0 then
-            local trainClassAcc = getClassAccuracy(d.trainset.data, d.trainset.label:cuda())
-            statsPrint(string.format("Epoch %d: Train set class accuracy = %.2f", epoch, trainClassAcc), g.sf)
-        end
-        print(string.format('Epoch time: %.2f seconds\n', epochTimer:time().real))
-        m.classifier:training()
-
-        g.accIdx = g.accIdx + 1
-        g.pastNAcc[g.accIdx] = valClassAcc
-        g.pastNLoss[g.accIdx] = math.min(avgLoss * 100, 100) -- Scale loss to fit in the same y axes as accuracy
-        if g.accIdx % g.plotNumEpochs == 0 then
-            g.avgDataAcc = g.avgDataAcc:cat(torch.Tensor({g.pastNAcc:mean()}))
-            g.maxDataAcc = g.maxDataAcc:cat(torch.Tensor({g.pastNAcc:max()}))
-            g.minDataAcc = g.minDataAcc:cat(torch.Tensor({g.pastNAcc:min()}))
-            g.avgDataLoss = g.avgDataLoss:cat(torch.Tensor({g.pastNLoss:mean()}))
-            g.maxDataLoss = g.maxDataLoss:cat(torch.Tensor({g.pastNLoss:max()}))
-            g.minDataLoss = g.minDataLoss:cat(torch.Tensor({g.pastNLoss:min()}))
-            if not g.skipPlot then
-                plotClassAccAndLoss(epoch, true)
-            end
-            g.accIdx = 0
-        end
-
-        local save
-        if p.modality == 'I' then
-            save = epoch % 10 == 0
-        else
-            save = epoch == 500 or epoch == 750 or epoch == 900 or epoch == 1000
-        end
-
-        if save then
-        -- if epoch == 300 or epoch == 500 or epoch == 750 or epoch == 900 or epoch == 1000 then
-            local date = os.date("*t", os.time())
-            local dateStr = date.month .. "_" .. date.day .. "_" .. date.hour .. "_" .. date.min
-            saveSnapshot(dateStr .. '_snapshot_epoch_' .. epoch)
-        end
-
-        g.numEpochsCompleted = g.numEpochsCompleted + 1
+    for epoch = 1, numEpochs do
+        local loss, valAcc = doOneEpoch()
     end
 end
 
@@ -428,6 +442,6 @@ function saveSnapshot(filename)
     end
     local snapshot = {}
     snapshot.params, snapshot.gparams = m.classifier:getParameters()
-    snapshot.g = g
+    snapshot.s = s
     torch.save(g.snapshotDir .. '/' .. modalityDir .. '/' .. filename .. '.t7', snapshot)
 end

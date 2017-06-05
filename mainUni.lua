@@ -7,7 +7,7 @@ function getTestPFS()
     pfs = rap_pfs.pfs
 end
 
-function runAllParamsets(datasetType, modality, paramFactorialSet, numEpochs, plotNumEpochs, consecutiveStop)
+function runAllParamsets(datasetType, modality, paramFactorialSet, numEpochs, plotNumEpochs, annealingThreshold, minAllowableLR)
 
     -- This is the main function to call
 
@@ -32,12 +32,8 @@ function runAllParamsets(datasetType, modality, paramFactorialSet, numEpochs, pl
     g.startStatsId = nil
 
     p.numEpochs = numEpochs
-    -- TODO: consecutiveStop is not implemented!
-    if consecutiveStop then
-        p.consecutiveStop = consecutiveStop
-    else
-        p.consecutiveStop = numEpochs + 1
-    end
+    p.annealingThreshold = annealingThreshold or numEpochs + 1
+    p.minAllowableLR = minAllowableLR or .001
 
     local numParamCombs = getNumParamCombs(paramFactorialSet)
     p.numKFoldSplits = getNumKFoldSplits(paramFactorialSet)
@@ -164,8 +160,8 @@ end
 function prepare()
 
     clearState()
-    resetPlotStats()
-    loadModel() -- uses p.layerSizes to build model
+    resetGlobals()
+    loadModelAndOptimState() -- uses p.layerSizes to build model
 
     if d.trainset == nil then
         loadData()
@@ -253,16 +249,68 @@ function trainAndEvaluateAutomatic(paramFactorialSet)
   local paramStr = printParams(paramFactorialSet, g.meta, g.sf)
   g.paramSettingsLegend[tostring(getLegendSize() + 1)] = paramStr
 
-  g.numEpochsCompleted = 0
   g.plotFilename = statsFileName .. '_plot.pdf'
-  trainAndEvaluate(p.numEpochs, p.batchSize)
+  g.snapshotFilename = statsFileName
 
-  g.valMaxMatrix[g.resultsParamIdx] = g.maxDataAcc
-  g.avgLossMatrix[g.resultsParamIdx] = g.avgDataLoss
+  local count = 0
+  local annealCount = 0
+  local epoch = 1
+  local bestLoss = 1e10
+  local bestLossEpoch = 0
+  local bestValAcc = -1
+  local bestValAccEpoch = 0
+  local lr = p.baseLearningRate
+  -- TODO: This is never set to false. Would have to change handling of s.maxDataAcc, etc. to be initialized
+  -- to size of max number of epochs
+  local continue = true 
+
+  while epoch <= p.numEpochs and continue do
+
+    local loss, valAcc = doOneEpoch()
+    if loss < bestLoss then
+        bestLoss = loss
+        bestLossEpoch = epoch
+    end
+    if valAcc > bestValAcc then
+        bestValAcc = valAcc
+        bestValAccEpoch = epoch
+        count = 0
+    else
+        count = count + 1
+    end
+
+    if count == p.annealingThreshold then
+
+        local newLR
+        -- Want lr to decay as follows: .1, .05, .01, .005, .001
+        if annealCount % 2 == 0 then
+            newLR = lr / 2
+        else
+            newLR = lr / 5
+        end
+
+        if newLR >= p.minAllowableLR then
+            lr = newLR
+            setOptimStateLRAndWD(lr, p.baseWeightDecay)
+            statsPrint(string.format('***Changing LR to %.4f @ epoch %d\n', lr, epoch), g.sf)
+            annealCount = annealCount + 1
+            count = 0
+        else
+            -- Reached minimum allowable learning rate. Just keep going.
+            -- In the future, could set continue to false here.
+            statsPrint(string.format('***Cannot set LR than %.4f @ epoch %d\n', lr, epoch), g.sf)
+        end
+    end
+
+    epoch = epoch + 1
+  end
+
+  g.valMaxMatrix[g.resultsParamIdx] = s.maxDataAcc
+  g.avgLossMatrix[g.resultsParamIdx] = s.avgDataLoss
 
   statsPrint(string.format('***** Finished run'), g.meta, g.sf)
-  statsPrint(string.format('Best val accuracy = %.2f', g.maxDataAcc:max()), g.meta, g.sf)
-  statsPrint(string.format('Best training avg loss (over 5 epochs) = %.2f\n\n', g.avgDataLoss:min()/100), g.meta, g.sf)
+  statsPrint(string.format('Best val accuracy = %.3f @ epoch %d', bestValAcc*100, bestValAccEpoch), g.meta, g.sf)
+  statsPrint(string.format('Best training avg loss = %.3f @ epoch %d\n\n', bestLoss, bestLossEpoch), g.meta, g.sf)
 
   io.close(g.sf)
 end
