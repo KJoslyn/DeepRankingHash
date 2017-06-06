@@ -15,7 +15,7 @@ end
 
 function getClassAccuracy(data, labels)
 
-    roundedOutput = computeInBatches(calcRoundedClassifierOutput, torch.CudaTensor(data:size(1), 24), data)
+    roundedOutput = computeInBatches(calcRoundedClassifierOutput, torch.CudaTensor(data:size(1), p.numClasses), data)
 
     numInstances = data:size(1)
     dotProd = torch.CudaTensor(numInstances)
@@ -31,13 +31,13 @@ end
 
 function getClassAccuracyForModality(modality)
     if modality == I then
-        data = d.trainset[I]:index(1, d.trainImages)
-        labels = d.train_labels_image:float():index(1, d.trainImages):cuda() -- TODO: is float() necessary?
+        data = d.trainset[I].data
+        labels = d.trainset[I].label:float()
     else
-        data = d.trainset[X]:index(1, d.trainTexts)
-        labels = d.train_labels_text:float():index(1, d.trainTexts):cuda()
+        data = d.trainset[X].data
+        labels = d.trainset[X].label:float()
     end
-    return getClassAccuracy(data, labels)
+    return getClassAccuracy(data, labels:cuda())
 end
 
 -- //////////////////////////////
@@ -73,9 +73,7 @@ end
 
 function computeInBatches(computeFunction, output, data) 
 
-    if data:size(2) == 1075 then -- Text modality
-        return computeFunction(data)
-    elseif data:size(2) == 3 then -- Image modality
+    if data:size(2) == 3 then -- Image modality
         local N = data:size(1)
         local batchSize = 128
         local numBatches = torch.ceil(N / batchSize)
@@ -86,8 +84,8 @@ function computeInBatches(computeFunction, output, data)
             output[{{ startIndex, endIndex}}] = computeFunction(batch)
         end
         return output    
-    else
-        print("Error: unrecognized modality")
+    else -- Text modality
+        return computeFunction(data)
     end
 end
 
@@ -95,74 +93,87 @@ end
 -- mAP Functions
 -- /////////////////////////////
 
-function getQueryAndDBCodes(fromModality, toModality, trainOrVal)
+function calcPretrainsetHashCodesForNuswide(modalityChar)
 
-    local endIdx = nil
-    local imageIdxSet = nil
-    local textIdxSet = nil
+    local N = d.dataset:sizePretraining()
 
-    -- d.trainImages, d.trainTexts, d.valImages, and d.valTexts come from pickSubset.lua. They are the indices of the images and texts that are
-    -- used in training or validation respectively. They index d.trainset[modality]. Only 5000 images and 5000 texts are used for training,
-    -- and 1000 images and 1000 texts are used for validation.
-    if trainOrVal == 'train' then
-        endIdx = d.trainImages:size(1)
-        imageIdxSet = d.trainImages
-        textIdxSet = d.trainTexts
-    elseif trainOrVal == 'val' then
-        endIdx = d.valImages:size(1)
-        imageIdxSet = d.valImages
-        textIdxSet = d.valTexts
-    else
-        print("Error: input to getQueryAndDBCodes must be \'train\' or \'val\'")
+    local codes = torch.CudaLongTensor(N, p.L)
+    local labels = torch.FloatTensor(N, p.numClasses)
+
+    local batchSize = 128
+    local numBatches = math.ceil(N / batchSize)
+
+    for batchNum = 0, numBatches - 1 do
+
+        local startIndex = batchNum * batchSize + 1
+        local endIndex = math.min((batchNum + 1) * batchSize, N)
+
+        local batchData, batchLabels = d.dataset:getBySplit('pretraining', modalityChar, startIndex, endIndex)
+        codes[{ {startIndex, endIndex} }] = calcHashCodes(batchData):reshape(endIndex - startIndex + 1, p.L)
+        labels[{ {startIndex, endIndex} }] = batchLabels
     end
 
-    images = imageIdxSet[ {{ 1, endIdx }} ]:long()
-    texts = textIdxSet[ {{ 1, endIdx }} ]:long()
-
-    if fromModality == I then
-        queries = d.trainset[I]:index(1, images)
-        queryLabels = d.train_labels_image:float():index(1, images)
-    else
-        queries = d.trainset[X]:index(1, texts)
-        queryLabels = d.train_labels_text:float():index(1, texts)
-    end
-
-    if toModality == I then
-        database = d.trainset[I]:index(1, images)
-        databaseLabels = d.train_labels_image:float():index(1, images)
-    else
-        database = d.trainset[X]:index(1, texts)
-        databaseLabels = d.train_labels_text:float():index(1, texts)
-    end
-
-    queryCodes = getHashCodes(queries)
-    databaseCodes = getHashCodes(database)
-
-    return queryCodes, databaseCodes, queryLabels, databaseLabels
+    return codes, labels
 end
 
-function getQueryAndDBCodesTest(fromModality, toModality)
+function getCodesAndLabelsForModalityAndClass(modality, class, usePrecomputedCodes)
 
-    if fromModality == I then
-        queries = d.testset[I]
-        queryLabels = d.test_labels_image:float()
-    else
-        queries = d.testset[X]
-        queryLabels = d.test_labels_text:float()
+    if class == 'pretraining' and p.datasetType == 'nus' then
+        return calcPretrainsetHashCodesForNuswide(modalityChar)
     end
 
-    if toModality == I then
-        database = d.trainset[I]
-        databaseLabels = d.train_labels_image:float()
-    else
-        database = d.trainset[X]
-        databaseLabels = d.train_labels_text:float()
+    local split, modalityChar
+    if class == 'pretraining' then
+        split = d.pretrainset
+        if modality == I then
+            modalityChar = 'I'
+        else
+            modalityChar = 'X'
+        end
+    elseif class == 'training' then
+        split = d.trainset
+    elseif class == 'val' then
+        split = d.valset
+    elseif class == 'query' then
+        split = d.testset
+    end
+    split = split[modality]
+
+    if usePrecomputedCodes and split.codes then
+        return split.codes, split.label
+    elseif class == 'pretraining' and not d.pretrainset[modality].data then -- assumes p.datasetType == 'mir'
+        d.pretrainset[modality].data, d.pretrainset[modality].label = d.dataset:getBySplit('pretraining', modalityChar, 1, d.dataset:sizePretraining())
+    end
+    local data = split.data
+
+    -- Compute and save the computed hash codes
+    split.codes = getHashCodes(data):reshape(data:size(1), p.L) -- TODO: Check if this works
+
+    return split.codes, split.label
+end
+
+function getCodesAndLabels(modality, classArg, usePrecomputedCodes)
+
+    local classes
+    if type(classArg) == 'string' then
+        classes = {classArg}
+    elseif type(classArg) == 'table' then
+        classes = classArg
+    end
+    -- local codes = torch.CudaLongTensor(N, p.L)
+    -- local labels = torch.FloatTensor(N, p.numClasses)
+
+    -- local allData = torch.FloatTensor() -- TODO: Correct?
+    local allCodes = torch.CudaLongTensor()
+    local allLabels = torch.FloatTensor()
+    for c = 1, #classes do
+        local class = classes[c]
+        local catCodes, catLabels = getCodesAndLabelsForModalityAndClass(modality, class, usePrecomputedCodes)
+        allCodes = torch.cat(allCodes, catCodes, 1)
+        allLabels = torch.cat(allLabels, catLabels, 1)
     end
 
-    queryCodes = getHashCodes(queries)
-    databaseCodes = getHashCodes(database)
-
-    return queryCodes, databaseCodes, queryLabels, databaseLabels
+    return allCodes, allLabels
 end
 
 function getDistanceAndSimilarityForMAP(queryCodes, databaseCodes, queryLabels, databaseLabels)
@@ -180,7 +191,7 @@ function getDistanceAndSimilarityForMAP(queryCodes, databaseCodes, queryLabels, 
         queryCodeRep = torch.expand(queryCodes[q]:reshape(p.L,1), p.L, numDB):transpose(1,2)
         D[q] = torch.ne(queryCodeRep, databaseCodes):sum(2)
 
-        queryLabelRep = torch.expand(queryLabels[q]:reshape(24,1), 24, numDB):transpose(1,2)
+        queryLabelRep = torch.expand(queryLabels[q]:reshape(p.numClasses,1), p.numClasses, numDB):transpose(1,2)
         S[q] = torch.cmul(queryLabelRep, databaseLabels):max(2)
     end
 
@@ -199,26 +210,19 @@ function saveDistAndSimToMatFile(D,S)
     matio.save(g.snapshotDir .. '/DS_data_' .. dateStr .. '.mat', {D=D_new,S=S_new})
 end
 
-function calcMAP(fromModality, toModality, trainValOrTest, saveToMatFile)
+function calcMAP(modalityFrom, modalityTo, classesFrom, classesTo, usePrecomputedCodes)
 
     m.fullModel:evaluate()
 
-    if trainValOrTest == 'test' then
-        queryCodes, databaseCodes, queryLabels, databaseLabels = getQueryAndDBCodesTest(fromModality, toModality, false)
-    else
-        queryCodes, databaseCodes, queryLabels, databaseLabels = getQueryAndDBCodes(fromModality, toModality, trainValOrTest)
-    end
-
-    databaseCodes = databaseCodes:reshape(databaseCodes:size(1), databaseCodes:size(2))
-    queryCodes = queryCodes:reshape(queryCodes:size(1), queryCodes:size(2))
+    local queryCodes, queryLabels = getCodesAndLabels(modalityFrom, classesFrom, usePrecomputedCodes)
+    local dbCodes, dbLabels = getCodesAndLabels(modalityTo, classesTo, usePrecomputedCodes)
 
     if saveToMatFile then
-        local D, S = getDistanceAndSimilarityForMAP(queryCodes, databaseCodes, queryLabels, databaseLabels)
+        local D, S = getDistanceAndSimilarityForMAP(queryCodes, dbCodes, queryLabels, dbLabels)
         saveDistAndSimToMatFile(D,S)
     end
 
-    -- return compute_map(queryCodes, databaseCodes, S)
-    return calcMAP_old(queryCodes, databaseCodes, queryLabels, databaseLabels)
+    return calcMAP_old(queryCodes, dbCodes, queryLabels, dbLabels)
 end
 
 function compute_map(test_data, train_data, similarities)
@@ -282,12 +286,10 @@ end
 -- Regularizer evaluation functions
 -- /////////////////////////////
 
-function getHashCodeBitCounts(data)
+function getHashCodeBitCounts(trainset)
 
-    -- data should be d.trainset or trainBatch.data
-
-    local th = getHashCodes(data[X])
-    local ih = getHashCodes(data[I])
+    local th = getHashCodes(trainset[X].data)
+    local ih = getHashCodes(trainset[I].data)
     local ibc = torch.LongTensor(p.L,p.k)
     local tbc = torch.LongTensor(p.L,p.k)
     for i=1,p.L do
@@ -307,7 +309,7 @@ end
 
 function getSoftMaxAvgDistFromOneHalf(modality)
 
-    local pred = getRawPredictions(d.trainset[modality])
+    local pred = getRawPredictions(d.trainset[modality].data)
     pred = pred:view(-1)
     local avgDist = torch.abs(pred - 0.5):mean()
 
@@ -339,5 +341,152 @@ function calcAndPrintHammingAccuracy(trainBatch, similarity_target, statsFile)
         similarity = torch.eq(imHash, teHash):sum(2):ge(i)
         numCorrect = torch.eq(similarity, similarity_target):sum()
         statsPrint(string.format("Accuracy%d = %.2f", i, numCorrect*100 / s), statsFile)
+    end
+end
+
+local function normalizePlotLine(line)
+
+    local norm = line / line:max()
+    return norm
+end
+
+local function getPlotLines(epoch)
+
+    if not g.plotStartEpoch then
+        g.plotStartEpoch = epoch
+    end
+
+    local elapsedEpochs = epoch - (g.plotStartEpoch - 1) -- startEpoch should be one greater than a multiple of g.plotNumEpochs
+
+    local x = torch.linspace(g.plotStartEpoch, epoch, elapsedEpochs)
+    local y_loss = normalizePlotLine(g.y_loss)
+    local y_cross = normalizePlotLine(g.y_cross)
+    local y_b1 = normalizePlotLine(g.y_b1)
+    local y_b2 = normalizePlotLine(g.y_b2)
+    local y_q1 = normalizePlotLine(g.y_q1)
+    local y_q2 = normalizePlotLine(g.y_q2)
+    local y_ixt = g.y_ixt
+    local y_xit = g.y_xit
+    local y_ixv = g.y_ixv
+    local y_xiv = g.y_xiv
+
+    local lines = {}
+    local bw = m.criterion.weights[2]
+    local qw = m.criterion.weights[4]
+    
+    if bw > 0 or qw > 0 then
+        lines[#lines + 1] = {x,y_loss, 'with lines ls 1 lc rgb \'black\''}
+    end
+    lines[#lines + 1] = {x,y_cross, 'with lines ls 1 lc rgb \'blue\''}
+    if bw > 0 then
+        local y_bavg = (y_b1 + y_b2) / 2
+        -- lines[#lines + 1] = {x,y_b1, 'with lines ls 2 lc rgb \'green\''}
+        -- lines[#lines + 1] = {x,y_b2, 'with lines ls 2 lc rgb \'purple\''}
+        lines[#lines + 1] = {x,y_bavg, 'with lines ls 2 lc rgb \'yellow\''}
+    end
+    if qw > 0 then
+        lines[#lines + 1] = {x,y_q1, 'with lines ls 1 lc rgb \'red\''}
+        lines[#lines + 1] = {x,y_q2, 'with lines ls 1 lc rgb \'orange\''}
+    end
+    if y_ixt:dim() > 0 then
+        lines[#lines + 1] = {x,y_ixt, 'with lines ls 2 lc rgb \'blue\''}
+        lines[#lines + 1] = {x,y_xit, 'with lines ls 2 lc rgb \'green\''}
+        lines[#lines + 1] = {x,y_ixv, 'with lines ls 2 lc rgb \'purple\''}
+        lines[#lines + 1] = {x,y_xiv, 'with lines ls 2 lc rgb \'red\''}
+    end
+
+    return lines
+end
+
+function plotCrossModalLoss(epoch)
+
+    local lines = getPlotLines(epoch)
+
+    if not g.plotFilename then
+        local date = os.date("*t", os.time())
+        local dateStr = date.month .. "_" .. date.day .. "_" .. date.hour .. "_" .. date.min
+        g.plotFilename = g.snapshotDir .. '/' .. dateStr .. '_' .. 'CMplot.pdf' 
+    end
+
+    gnuplot.pdffigure(g.plotFilename)
+
+    gnuplot.plot(unpack(lines))
+
+    gnuplot.raw('set style line 2 dashtype 2')
+
+    gnuplot.plotflush()
+end
+
+function plotCrossModalLoss_old(epoch)
+
+    if not g.plotStartEpoch then
+        g.plotStartEpoch = epoch
+    end
+
+    local elapsedEpochs = epoch - (g.plotStartEpoch - 1) -- startEpoch should be one greater than a multiple of g.plotNumEpochs
+
+    local x = torch.linspace(g.plotStartEpoch, epoch, elapsedEpochs)
+    local y_loss = g.y_loss
+    local y_ixt = g.y_ixt
+    local y_xit = g.y_xit
+    local y_ixv = g.y_ixv
+    local y_xiv = g.y_xiv
+
+    if not g.plotFilename then
+        local date = os.date("*t", os.time())
+        local dateStr = date.month .. "_" .. date.day .. "_" .. date.hour .. "_" .. date.min
+        g.plotFilename = g.snapshotDir .. '/' .. dateStr .. '_' .. 'CMplot.pdf' 
+    end
+
+    gnuplot.pdffigure(g.plotFilename)
+
+    if y_ixt:dim() == 0 then
+        gnuplot.plot({x,y_loss, 'with lines ls 1 lc rgb \'black\''})
+    else
+        gnuplot.plot({x,y_loss, 'with lines ls 1 lc rgb \'black\''},
+                    {x,y_cross, 'with lines ls 1 lc rgb \'blue\''},
+                    {x,y_b1, 'with lines ls 1 lc rgb \'green\''},
+                    {x,y_b2, 'with lines ls 1 lc rgb \'purple\''},
+                    {x,y_q1, 'with lines ls 1 lc rgb \'red\''},
+                    {x,y_q2, 'with lines ls 1 lc rgb \'orange\''},
+                    {x,y_ixt, 'with lines ls 1 lc rgb \'blue\''},
+                    {x,y_xit, 'with lines ls 1 lc rgb \'green\''},
+                    {x,y_ixv, 'with lines ls 1 lc rgb \'purple\''},
+                    {x,y_xiv, 'with lines ls 1 lc rgb \'red\''})
+    end
+
+    gnuplot.plotflush()
+end
+
+function plotClassAccAndLoss(epoch, plotLoss)
+    local elapsedEpochs = epoch - (g.plotStartEpoch - 1) -- startEpoch should be one greater than a multiple of g.plotNumEpochs
+    if elapsedEpochs / g.plotNumEpochs > 1 then
+        local x = torch.linspace(g.plotStartEpoch + g.plotNumEpochs - 1, epoch, elapsedEpochs / g.plotNumEpochs)
+
+        local y = s.avgDataAcc
+        local yh = s.maxDataAcc
+        local yl = s.minDataAcc
+        local yy = torch.cat(x,yh,2)
+        local yy = torch.cat(yy,yl,2)
+
+        local y2 = s.avgDataLoss
+        local yh2 = s.maxDataLoss
+        local yl2 = s.minDataLoss
+        local yy2 = torch.cat(x, yh2, 2)
+        local yy2 = torch.cat(yy2, yl2, 2)
+
+        if not g.plotFilename then
+            local date = os.date("*t", os.time())
+            local dateStr = date.month .. "_" .. date.day .. "_" .. date.hour .. "_" .. date.min
+            g.plotFilename = g.snapshotDir .. '/' .. dateStr .. '_' .. 'plot.pdf' 
+        end
+        gnuplot.pdffigure(g.plotFilename)
+        if plotLoss then
+            gnuplot.plot({yy2,'with filledcurves fill transparent solid 0.5'},{x,yl2,'with lines ls 1'},{x,yh2,'with lines ls 1'},{x,y2,'with lines ls 1'},
+                         {yy,'with filledcurves fill transparent solid 0.5'},{x,yl,'with lines ls 1'},{x,yh,'with lines ls 1'},{x,y,'with lines ls 1'})
+        else
+            gnuplot.plot({yy,'with filledcurves fill transparent solid 0.5'},{x,yl,'with lines ls 1'},{x,yh,'with lines ls 1'},{x,y,'with lines ls 1'})
+        end
+        gnuplot.plotflush()
     end
 end

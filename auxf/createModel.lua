@@ -31,12 +31,12 @@ end
 
 function getHashLayerGrouped(prevLayerSize, L, k, lrMultForHashLayer, addHiddenLayer)
 
-    local groupSize = prevLayerSize / L
+    local groupSize = math.ceil(prevLayerSize / L)
 
     local hashLayer = nn.Sequential()
 
     if addHiddenLayer then
-        hashLayer:add(nn.Linear(prevLayerSize, prevLayerSize)
+        hashLayer:add(nn.Linear(prevLayerSize, groupSize * L)
                  :init('weight', nninit.xavier, {dist = 'normal'})
                  :learningRate('weight', lrMultForHashLayer))
     end
@@ -58,6 +58,26 @@ function getHashLayerGrouped(prevLayerSize, L, k, lrMultForHashLayer, addHiddenL
     hashLayer:add(nn.JoinTable(2))
 
     return hashLayer
+end
+
+function getImageModelImageNetPretrained(lrMultForLastLayer)
+    -- Uses pre-trained model from https://github.com/BVLC/caffe/tree/master/models/bvlc_alexnet
+
+    local model = nn.Sequential()
+
+    local imDir = '/home/kjoslyn/kevin/Project/IMAGENET/'
+    local model = loadcaffe.load(imDir .. 'deploy.prototxt', imDir .. 'bvlc_alexnet.caffemodel', 'cudnn')
+    model.modules[24] = nil
+    model.modules[23] = nil
+    model:add(nn.Linear(4096, p.numClasses)
+            :init('weight', nninit.xavier, {dist = 'normal', gain = 'sigmoid'})
+            :learningRate('weight', lrMultForLastLayer))
+
+    model:add(nn.Sigmoid())
+
+    model = model:cuda()
+
+    return model
 end
 
 function getImageModel()
@@ -87,7 +107,7 @@ function getImageModel()
     model:add(nn.Linear(4096, 4096):init('weight', nninit.xavier, {dist = 'normal', gain = 'relu'}))
     model:add(cudnn.ReLU(true))
     model:add(nn.Dropout(0.500000))
-    model:add(nn.Linear(4096, 24):init('weight', nninit.xavier, {dist = 'normal', gain = 'sigmoid'}))
+    model:add(nn.Linear(4096, p.numClasses):init('weight', nninit.xavier, {dist = 'normal', gain = 'sigmoid'}))
 
     model:add(nn.Sigmoid())
 
@@ -98,15 +118,115 @@ function getImageModelForFullNet(L, k, type, lrMultForHashLayer)
 
     local model = getImageModel()
 
-    local snapshot2ndLevelDir = 'imageNet'
-    local snapshotFile = 'snapshot_epoch_500.t7'
-    loadModelSnapshot(model, snapshot2ndLevelDir, snapshotFile)
+    local snapshotFile 
+    if p.datasetType == 'mir' then
+        snapshotFile = 'id1.t7'
+    elseif p.datasetType == 'nus' then
+        snapshotFile = 'snapshot_epoch22.t7'
+    end
+    loadModelSnapshot(model, 'imageNet', snapshotFile)
+
+    -- local snapshot2ndLevelDir = 'imageNet'
+    -- local snapshotFile = 'snapshot_epoch_500.t7'
+    -- loadModelSnapshot(model, snapshot2ndLevelDir, snapshotFile)
 
     model.modules[#model.modules] = nil -- This is messy, but need to remove sigmoid layer for now. Will add it back later.
     return createClassifierAndHasher(model, 4096, L, k, type, lrMultForHashLayer)
 end
 
-function getTextModelForFullNet(L, k, type, lrMultForHashLayer)
+function table.shallow_copy(t)
+  local t2 = {}
+  for k,v in pairs(t) do
+    t2[k] = v
+  end
+  return t2
+end
+
+function buildCustomTextModel(layerSizes)
+
+    local model = nn.Sequential()
+
+    local ls = table.shallow_copy(layerSizes)
+
+    ls[#ls + 1] = p.numClasses
+
+    -- { t, 2048 } is basic (2 hidden layers)
+    -- p.tagDim -> p.tagDim (t)
+    -- p.tagDim -> 2048     (2048)
+    -- 2048 -> p.numClasses [Assumed]
+
+    local lprev
+    for i = 1, #ls do
+        local from, to
+        if i == 1 then
+            from = p.tagDim
+        else
+            from = lprev 
+        end
+
+        local lt = ls[i]
+        if lt == 't' then
+            to = p.tagDim
+        else
+            to = lt
+        end
+
+        if i ~= 1 then
+            model:add(cudnn.ReLU(true))
+            model:add(nn.Dropout(0.500000))
+        end
+
+        local weightInit
+        if not p.weightInit or p.weightInit == 'xavier' then
+            weightInit = nninit.xavier
+        elseif p.weightInit == 'kaiming' then
+            weightInit = nninit.kaiming
+        else
+            print('Error: Unrecognized weight initialization scheme')
+        end
+
+        -- model:add(nn.Linear(from, to):init('weight', nninit.xavier, {dist = 'normal', gain = 'relu'}))
+        model:add(nn.Linear(from, to):init('weight', weightInit, {dist = 'normal', gain = 'relu'}))
+
+        lprev = to
+    end
+
+    model:add(nn.Sigmoid())
+    
+    model = model:cuda()
+
+    return model
+end
+
+function doGetBasicTextModel()
+
+    local model = nn.Sequential()
+    -- model.add(nn.View(-1):setNumInputDims(3))
+    model:add(nn.Linear(p.tagDim, p.tagDim):init('weight', nninit.xavier, {dist = 'normal', gain = 'relu'}))
+    model:add(cudnn.ReLU(true))
+    model:add(nn.Dropout(0.500000))
+    model:add(nn.Linear(p.tagDim, 2048):init('weight', nninit.xavier, {dist = 'normal', gain = 'relu'}))
+    model:add(cudnn.ReLU(true))
+    model:add(nn.Dropout(0.500000))
+    model:add(nn.Linear(2048, p.numClasses):init('weight', nninit.xavier, {dist = 'normal', gain = 'sigmoid'}))
+
+    model:add(nn.Sigmoid())
+    
+    model = model:cuda()
+
+    return model
+end
+
+function getUntrainedTextModel(layerSizes)
+
+    if not layerSizes then
+        return doGetBasicTextModel()
+    else
+        return buildCustomTextModel(layerSizes)
+    end
+end
+
+function getMirflickrCaffeTrainedTextModel()
 
     local model = loadcaffe.load(g.filePath .. 'text model/tag_trainnet.prototxt', g.filePath .. 'text model/snapshot_iter_200.caffemodel', 'cudnn')
 
@@ -116,31 +236,39 @@ function getTextModelForFullNet(L, k, type, lrMultForHashLayer)
         model.modules[i] = model.modules[i+1]
     end
     model.modules[#model.modules] = nil
+
+    model:add(nn.Sigmoid())
+
+    return model
+end
+
+function getTextModelForFullNet(L, k, type, lrMultForHashLayer)
+
+    local model = getUntrainedTextModel()
+    local snapshotFile 
+    if p.datasetType == 'mir' then
+        -- snapshotFile = '2hl_epoch250.t7'
+        -- snapshotFile = 'sn1700.t7'
+        snapshotFile = 'epoch330.t7'
+    elseif p.datasetType == 'nus' then
+        -- snapshotFile = '2hl_epoch100.t7'
+        snapshotFile = '1hl_epoch100.t7'
+    end
+    loadModelSnapshot(model, 'textNet', snapshotFile)
+
+    -- if p.datasetType == 'mir' then
+    --     model = getMirflickrCaffeTrainedTextModel()
+    -- elseif p.datasetType == 'nus' then
+    --     model = getUntrainedTextModel()
+    --     local snapshot2ndLevelDir = 'textNet/Large'
+    --     local snapshotFile = 'snapshot_epoch_500.t7'
+    --     loadModelSnapshot(model, snapshot2ndLevelDir, snapshotFile)
+    -- end
+
+    model.modules[#model.modules] = nil -- This is messy, but need to remove sigmoid layer for now. Will add it back later.
 
     return createClassifierAndHasher(model, 2048, L, k, type, lrMultForHashLayer)
 end
-
-function getTextModel2()
-    local model = loadcaffe.load(g.filePath .. 'text model/tag_trainnet.prototxt', g.filePath .. 'text model/snapshot_iter_200.caffemodel', 'cudnn')
-
-    -- Remove first layer that comes from caffemodel
-    model.modules[1] = nil
-    for i = 1,#model.modules-1 do
-        model.modules[i] = model.modules[i+1]
-    end
-    model.modules[#model.modules] = nil
-
-    model:add(nn.Sigmoid())
-    return model
-end
-
-function getImageModel2()
-
-    local model = loadcaffe.load(g.filePath .. 'CNN Model/trainnet.prototxt', g.filePath .. 'CNN Model/snapshot_iter_16000.caffemodel', 'cudnn')
-    model:add(nn.Sigmoid())
-    return model
-end
-
 
 function createClassifierAndHasher(model, prevLayerSize, L, k, type, lrMultForHashLayer)
 
@@ -328,7 +456,6 @@ end
 
 function loadModelSnapshot(model, snapshot2ndLevelDir, snapshotFileName)
 
-
   -- If these aren't specified, use hardcoded values
   if not snapshot2ndLevelDir and snapshotFileName then
     -- local snapshot2ndLevelDir = 'Lr5e4_5kquery_5kdatabase'
@@ -336,9 +463,15 @@ function loadModelSnapshot(model, snapshot2ndLevelDir, snapshotFileName)
     local snapshotFileName = 'snapshot_epoch_500.t7'
   end
 
-  print('****Loading snapshot: ' .. snapshot2ndLevelDir .. '/' .. snapshotFileName)
+  local snapshotFullPath
+  if not snapshot2ndLevelDir then
+    print('****Loading snapshot: ' .. snapshotFileName)
+    snapshotFullPath = g.snapshotDir .. '/' .. snapshotFileName
+  else
+    print('****Loading snapshot: ' .. snapshot2ndLevelDir .. '/' .. snapshotFileName)
+    snapshotFullPath = g.snapshotDir .. '/' .. snapshot2ndLevelDir .. '/' .. snapshotFileName
+  end
 
-  local snapshotFullPath = g.snapshotDir .. '/' .. snapshot2ndLevelDir .. '/' .. snapshotFileName
   local snapshot = torch.load(snapshotFullPath)
   local N = snapshot.params:size(1)
 

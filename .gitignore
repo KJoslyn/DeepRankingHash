@@ -6,3 +6,6 @@ ImKFold*
 Results/autoStats/**/*.txt
 Results/autoStats/**/*.mat
 Results/autoStats/**/*.fig
+README.md
+valprep.sh
+valprocess.lua

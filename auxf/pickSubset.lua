@@ -1,3 +1,55 @@
+-- TODO: This is the only function currently used in pickSubset. Technically this could just be a .m script.
+function getCrossModalPairs()
+
+	if not matio then
+		matio = require 'matio'
+	end
+	-- srt = sim_ratio_tr
+	-- local srt = torch.load(g.datasetPath .. 'simRatioTr.t7')
+	local srt = matio.load(g.datasetPath .. 'simRatioTr.mat')
+	srt = srt.sim_ratio
+	local N = srt:size(1)
+
+	-- local split = matio.load(g.datasetPath .. 'datasetSplit.mat')
+	-- split = split.split
+
+	local pos_pairs_full = torch.Tensor(N*N, 3)
+	local neg_pairs_full = torch.LongTensor(N*N, 2)
+	local p_idx = 1
+	local n_idx = 1
+	for i = 1,N do
+		for j = 1,N do
+			local sr = srt[i][j]
+			-- local iIdx = split.trainSet.indices[1][i]
+			-- local jIdx = split.trainSet.indices[1][j]
+			if sr == 0 then
+				neg_pairs_full[n_idx][1] = i
+				neg_pairs_full[n_idx][2] = j
+				n_idx = n_idx + 1
+			elseif sr > 0.5 then
+				pos_pairs_full[p_idx][1] = i
+				pos_pairs_full[p_idx][2] = j
+				pos_pairs_full[p_idx][3] = sr
+				p_idx = p_idx + 1
+			end
+		end
+		if i % 1000 == 0 then
+		   print('Outer loop: done with ' .. i)
+        end
+	end
+	pos_pairs_full:resize(p_idx - 1, 3)
+	neg_pairs_full:resize(n_idx - 1, 2)
+
+	subset_info = {}
+	subset_info.pos_pairs = pos_pairs_full -- Important- this is loaded later as pos_pairs full
+	subset_info.neg_pairs = neg_pairs_full -- Important- this is loaded later as neg_pairs full
+
+	local p_size = pos_pairs_full:size(1)
+	local n_size = neg_pairs_full:size(1)
+
+	return pos_pairs_full, neg_pairs_full
+end
+
 -- function getKFoldSplit(kFold_images, kFold_texts, kNum)
 function getKFoldSplit(kNum)
 
@@ -94,7 +146,7 @@ function pickSubset(loadPairsFromFile)
 	-- d.trainset[2] is all texts
 	if not loadPairsFromFile then
 
-		local sim_ratio_tr = torch.load(g.filePath .. 'simRatioTr.t7')
+		local sim_ratio_tr = torch.load(g.datasetPath .. 'simRatioTr.t7')
 		-- sim_ratio_te = torch.load(g.filePath .. 'simRatioTe.t7')
 
 		local images = torch.randperm(17251)[{{1,6000}}]:long()
@@ -137,7 +189,7 @@ function pickSubset(loadPairsFromFile)
 		subset_info.valImages = valImages
 		subset_info.valTexts = valTexts
 	else
-		subset_info = torch.load(g.filePath .. 'subsetInfo.t7')
+		subset_info = torch.load(g.datasetPath .. 'subsetInfo.t7')
 
 		local pos_pairs_full = subset_info.pos_pairs
 		local neg_pairs_full = subset_info.neg_pairs

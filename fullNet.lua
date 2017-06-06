@@ -13,10 +13,12 @@ function loadStandardPackages()
   require 'cutorch'
   require 'cunn'
   require 'cudnn'
+  require 'imagenetloader.dataset'
+  gnuplot = require 'gnuplot'
 
 end -- end loadPackages()
 
-function loadParamsAndPackages(iterationsPerEpoch)
+function loadParamsAndPackages(datasetType, iterationsPerEpoch)
 
   if not nn then
     loadStandardPackages()
@@ -36,32 +38,48 @@ function loadParamsAndPackages(iterationsPerEpoch)
   p.L = 8
   p.k = 4
   p.sim_label_type = 'fixed' -- 'variable'
-  p.baseLearningRate = 1e-6
+  p.baseLearningRate = 1e-6 -- 1e-6
   p.baseLearningRateDecay = 0 -- 1e-3
-  p.baseMomentum = 0 -- .9
-  p.baseWeightDecay = 0
-  p.posExamplesPerBatch = 25 -- 20
-  p.negExamplesPerBatch = 75 -- 100
-  -- p.iterationsPerEpoch = 100
-  p.iterationsPerEpoch = iterationsPerEpoch
+  p.baseMomentum = .9 -- .9
+  p.baseWeightDecay = 0 -- 1e-6
+  p.posExamplesPerBatch = 50 -- 25, 20
+  p.negExamplesPerBatch = 150 -- 75, 100
+  p.iterationsPerEpoch = iterationsPerEpoch -- 25, (50), 100
   p.kFoldSplitSize = 500
   p.kFoldNumSplits = 5
 
   -- These are inferred from above
-  local posExamplesPerEpoch = p.posExamplesPerBatch*p.iterationsPerEpoch
-  local negExamplesPerEpoch = p.negExamplesPerBatch*p.iterationsPerEpoch
-  local epochSize = posExamplesPerEpoch + negExamplesPerEpoch
+  p.posExamplesPerEpoch = p.posExamplesPerBatch*p.iterationsPerEpoch
+  p.negExamplesPerEpoch = p.negExamplesPerBatch*p.iterationsPerEpoch
+  local epochSize = p.posExamplesPerEpoch + p.negExamplesPerEpoch
   p.batchSize = p.posExamplesPerBatch + p.negExamplesPerBatch
   p.numBatches = epochSize / p.batchSize
 
   -- Variable Boolean Parameters (1 or 0)
   p.trainOnOneBatch = 0
 
+  -- Dataset
+  local snapshotDatasetDir
+  if datasetType == 'mir' then
+      p.numClasses = 24
+      p.tagDim = 1075
+      snapshotDatasetDir = '/mirflickr'
+      g.datasetPath = '/home/kjoslyn/datasets/mirflickr/'
+  elseif datasetType == 'nus' then
+      p.numClasses = 21
+      p.tagDim = 1000
+      snapshotDatasetDir = '/nuswide'
+      g.datasetPath = '/home/kjoslyn/datasets/nuswide/'
+  else
+      print("Error: Unrecognized datasetType!! Should be mir or nus")
+  end
+  p.datasetType = datasetType
+
   -- Fixed Parameters
   I = 1 -- Table index for image modality - This is its own global variable
   X = 2 -- Table index for text modality - This is its own global variable
   g.filePath = '/home/kjoslyn/kevin/' -- server
-  g.snapshotDir = '/home/kjoslyn/kevin/Project/snapshots'
+  g.snapshotDir = '/home/kjoslyn/kevin/Project/snapshots' .. snapshotDatasetDir
 
   reloadAuxfPackage('pickSubset')
   reloadAuxfPackage('evaluate')
@@ -69,6 +87,17 @@ function loadParamsAndPackages(iterationsPerEpoch)
   reloadAuxfPackage('batchLoader')
   reloadAuxfPackage('createModel')
   reloadAuxfPackage('map')
+
+  g.y_loss = torch.Tensor()
+  g.y_cross = torch.Tensor()
+  g.y_b1 = torch.Tensor()
+  g.y_b2 = torch.Tensor()
+  g.y_q1 = torch.Tensor()
+  g.y_q2 = torch.Tensor()
+  g.y_xit = torch.Tensor()
+  g.y_ixt = torch.Tensor()
+  g.y_xiv = torch.Tensor()
+  g.y_ixv = torch.Tensor()
 end
 
 function reloadAuxfPackage(pname)
@@ -80,6 +109,8 @@ end
 function loadFullModel(modelType, lrMultForHashLayer, loadSiameseModels)
 
   collectgarbage()
+
+  p.modelType = modelType
 
   m.imageClassifier, m.imageHasher = getImageModelForFullNet(p.L, p.k, modelType, lrMultForHashLayer)
   m.textClassifier, m.textHasher = getTextModelForFullNet(p.L, p.k, modelType, lrMultForHashLayer)
@@ -93,39 +124,36 @@ end
 
 function loadData() 
 
-  if not d.trainset then
-      d.trainset = {}
-      d.testset = {}
+  d.trainset = {}
+  d.trainset[I] = {}
+  d.trainset[X] = {}
+  d.valset = {}
+  d.valset[I] = {}
+  d.valset[X] = {}
+  d.testset = {}
+  d.testset[I] = {}
+  d.testset[X] = {}
+  d.pretrainset = {}
+  d.pretrainset[I] = {}
+  d.pretrainset[X] = {}
 
-      -- d.train_images and test_images each contain data and label fields
-      local train_images, test_images = getImageData()
-      d.trainset[I] = train_images.data
-      d.testset[I] = test_images.data
+  local imageRootPath = g.datasetPath .. 'ImageData'
+  d.dataset = imageLoader{path=imageRootPath, sampleSize={3,227,227}, splitFolders={'training', 'pretraining', 'val', 'query'}}
 
-      d.train_labels_image = train_images.label
-      d.test_labels_image = test_images.label
+  d.trainset[I].data, d.trainset[I].label = d.dataset:getBySplit('training', 'I', 1, d.dataset:sizeTrain())
+  d.trainset[X].data, d.trainset[X].label = d.dataset:getBySplit('training', 'X', 1, d.dataset:sizeTrain())
 
-      d.trainset[X], d.testset[X], d.train_labels_text, d.test_labels_text = getTextData()
-  end
+  d.valset[I].data, d.valset[I].label = d.dataset:getBySplit('val', 'I', 1, d.dataset:sizeVal())
+  d.valset[X].data, d.valset[X].label = d.dataset:getBySplit('val', 'X', 1, d.dataset:sizeVal())
 
-  -- if not d.pos_pairs_full then
-  --     d.pos_pairs_full, d.neg_pairs_full, d.trainImages, d.trainTexts, d.valImages, d.valTexts, d.pos_pairs_image, d.neg_pairs_image, d.pos_pairs_text, d.neg_pairs_text = pickSubset(true)
-  -- end
+  d.testset[I].data, d.testset[I].label = d.dataset:getBySplit('query', 'I', 1, d.dataset:sizeTest())
+  d.testset[X].data, d.testset[X].label = d.dataset:getBySplit('query', 'X', 1, d.dataset:sizeTest())
+
+  local pairs = torch.load(g.datasetPath .. 'crossModalPairs.t7')
+  d.pos_pairs_full = pairs.pos_pairs
+  d.neg_pairs_full = pairs.neg_pairs
 
 end -- end loadData()
-
-function loadTrainAndValSubsets(kNum)
-
-  if not kNum then
-      d.pos_pairs_full, d.neg_pairs_full, d.trainImages, d.trainTexts, d.valImages, d.valTexts, d.pos_pairs_image, d.neg_pairs_image, d.pos_pairs_text, d.neg_pairs_text = pickSubset(true)
-  else
-      if not d.kFold_images then
-        pickKFoldSubset(p.kFoldSplitSize, p.kFoldNumSplits, true)
-      end
-      d.pos_pairs_full, d.neg_pairs_full, d.trainImages, d.trainTexts, d.valImages, d.valTexts = getKFoldSplit(kNum)
-      d.kNumLoaded = kNum
-  end
-end
 
 function runEvals()
 
@@ -140,22 +168,40 @@ function runEvals()
 
   local imageAccuracy = getClassAccuracyForModality(I)
   local textAccuracy = getClassAccuracyForModality(X)
-  statsPrint(string.format('Image Classification Acc: %.2f', imageAccuracy), g.sf, g.sfv)
-  statsPrint(string.format('Text Classification Acc: %.2f', textAccuracy), g.sf, g.sfv)
+  statsPrint(string.format('Train Image Classification Acc: %.2f', imageAccuracy), g.sf, g.sfv)
+  statsPrint(string.format('Train Text Classification Acc: %.2f', textAccuracy), g.sf, g.sfv)
 
   local batchTextClassAcc = getClassAccuracy(trainBatch.data[X], trainBatch.label[X])
   local batchImageClassAcc = getClassAccuracy(trainBatch.data[I], trainBatch.label[I])-- TODO: This is not very useful because it is only for the last batch in the epoch
   statsPrint(string.format("Batch Text Classification Acc = %.2f", batchTextClassAcc), g.sfv)
   statsPrint(string.format("Batch Image Classification Acc = %.2f", batchImageClassAcc), g.sfv)
 
-  local IXt = calcMAP(I, X, 'train')
-  local XIt = calcMAP(X, I, 'train')
-  local IXv = calcMAP(I, X, 'val')
-  local XIv = calcMAP(X, I, 'val')
-  local IIt = calcMAP(I, I, 'train')
-  local XXt = calcMAP(X, X, 'train')
-  local IIv = calcMAP(I, I, 'val')
-  local XXv = calcMAP(X, X, 'val')
+  -- Clear codes to signal need to compute the hash codes again
+  d.trainset[I].codes = nil
+  d.trainset[X].codes = nil
+  d.pretrainset[I].codes = nil
+  d.pretrainset[X].codes = nil
+  d.valset[I].codes = nil
+  d.valset[X].codes = nil
+  d.testset[I].codes = nil
+  d.testset[X].codes = nil
+  -- local IXt = calcMAP(I, X, 'training', 'training', true)
+  -- local XIt = calcMAP(X, I, 'training', 'training', true)
+  -- local IXv = calcMAP(I, X, 'val', 'val', true)
+  -- local XIv = calcMAP(X, I, 'val', 'val', true)
+  -- local IIt = calcMAP(I, I, 'training', 'training', true)
+  -- local XXt = calcMAP(X, X, 'training', 'training', true)
+  -- local IIv = calcMAP(I, I, 'val', 'val', true)
+  -- local XXv = calcMAP(X, X, 'val', 'val', true)
+  local classesTo = {'training','pretraining','val'}
+  local IXt = calcMAP(I, X, 'training', classesTo, true)
+  local XIt = calcMAP(X, I, 'training', classesTo, true)
+  local IXv = calcMAP(I, X, 'val', classesTo, true)
+  local XIv = calcMAP(X, I, 'val', classesTo, true)
+  local IIt = calcMAP(I, I, 'training', classesTo, true)
+  local XXt = calcMAP(X, X, 'training', classesTo, true)
+  local IIv = calcMAP(I, I, 'val', classesTo, true)
+  local XXv = calcMAP(X, X, 'val', classesTo, true)
 
   statsPrint(string.format("X -> I train MAP = %.2f", XIt), g.sf, g.sfv)
   statsPrint(string.format("I -> X train MAP = %.2f", IXt), g.sf, g.sfv)
@@ -170,7 +216,7 @@ function runEvals()
 
 end
 
-function trainAndEvaluate(modality, numEpochs, evalInterval, arg1, arg2)
+function trainAndEvaluate(modality, numEpochs, evalInterval, plot, arg1, arg2)
 
   local paramsAndOptimStatePrepared = arg1 and arg1 == 'skip' or arg2 and arg2 == 'skip'
   local logResults = arg1 and arg1 == 'log' or arg2 and arg2 == 'log'
@@ -187,10 +233,37 @@ function trainAndEvaluate(modality, numEpochs, evalInterval, arg1, arg2)
   -- end
 
   for epoch = 1, numEpochs do
-    doOneEpochOnModality(modality, epoch, logResults)
 
-    if epoch % evalInterval == 0 then
-      runEvals()
+    doOneEpochOnModality(modality, logResults)
+
+    -- if g.overallEpoch == 10 then
+    --   changeLearningRateForHashLayer(1e4)
+    -- elseif g.overallEpoch == 50 then
+    --   changeLearningRateForHashLayer(5e3)
+    -- end
+
+    if evalInterval and g.overallEpoch % evalInterval == 0 then
+
+      local IXt, XIt, IXv, XIv = runEvals()
+
+      g.y_ixt = g.y_ixt:cat(torch.Tensor({IXt}))
+      g.y_xit = g.y_xit:cat(torch.Tensor({XIt}))
+      g.y_ixv = g.y_ixv:cat(torch.Tensor({IXv}))
+      g.y_xiv = g.y_xiv:cat(torch.Tensor({XIv}))
+    elseif g.overallEpoch < evalInterval then
+      g.y_ixt = g.y_ixt:cat(torch.Tensor({.5}))
+      g.y_xit = g.y_xit:cat(torch.Tensor({.5}))
+      g.y_ixv = g.y_ixv:cat(torch.Tensor({.5}))
+      g.y_xiv = g.y_xiv:cat(torch.Tensor({.5}))
+    else
+      g.y_ixt = g.y_ixt:cat(torch.Tensor({g.y_ixt[g.overallEpoch - 1]}))
+      g.y_xit = g.y_xit:cat(torch.Tensor({g.y_xit[g.overallEpoch - 1]}))
+      g.y_ixv = g.y_ixv:cat(torch.Tensor({g.y_ixv[g.overallEpoch - 1]}))
+      g.y_xiv = g.y_xiv:cat(torch.Tensor({g.y_xiv[g.overallEpoch - 1]}))
+    end
+
+    if plot then
+      plotCrossModalLoss(g.overallEpoch)
     end
   end
 
@@ -265,10 +338,74 @@ function changeLearningRateForClassifier(lrMult)
 
   if not classifierWeightIndices then
     classifierWeightIndices = o.optimState_full.learningRates:eq(1)
-    hashLayerIndices = o.optimState_full.learningRates:neq(1)
+    hashLayerIndices = o.optimState_full.learningRates:ne(1)
   end
   o.optimState_full.learningRates[classifierWeightIndices] = lrMult
 
+end
+
+function changeLearningRateForHashLayer(lrMult)
+
+  -- Image
+  if p.modelType == 'hfc' then
+    m.fullModel:get(1):get(1):get(2):get(1):get(23):get(2):get(1):learningRate('weight', lrMult)
+    m.fullModel:get(1):get(1):get(2):get(1):get(23):get(2):get(1):learningRate('bias', lrMult)
+    m.fullModel:get(1):get(1):get(2):get(1):get(23):get(2):get(2):learningRate('weight', lrMult)
+    m.fullModel:get(1):get(1):get(2):get(1):get(23):get(2):get(2):learningRate('bias', lrMult)
+  elseif p.modelType == 'hgr' then
+    m.fullModel:get(1):get(1):get(2):get(1):get(23):get(2):get(1):learningRate('weight', lrMult)
+    m.fullModel:get(1):get(1):get(2):get(1):get(23):get(2):get(1):learningRate('bias', lrMult)
+    m.fullModel:get(1):get(1):get(2):get(1):get(23):get(2):get(4):get(1):learningRate('weight', lrMult)
+    m.fullModel:get(1):get(1):get(2):get(1):get(23):get(2):get(4):get(1):learningRate('bias', lrMult)
+  end
+
+  -- Text
+  -- 2 hidden layer text model
+  -- m.fullModel:get(1):get(2):get(2):get(1):get(10):get(2):get(1):learningRate('weight', lrMult)
+  -- m.fullModel:get(1):get(2):get(2):get(1):get(10):get(2):get(1):learningRate('bias', lrMult)
+  -- m.fullModel:get(1):get(2):get(2):get(1):get(10):get(2):get(2):learningRate('weight', lrMult)
+  -- m.fullModel:get(1):get(2):get(2):get(1):get(10):get(2):get(2):learningRate('bias', lrMult)
+  -- 1 hidden layer text model
+  if p.modelType == 'hfc' then
+    m.fullModel:get(1):get(2):get(2):get(1):get(7):get(2):get(1):learningRate('weight', lrMult)
+    m.fullModel:get(1):get(2):get(2):get(1):get(7):get(2):get(1):learningRate('bias', lrMult)
+    m.fullModel:get(1):get(2):get(2):get(1):get(7):get(2):get(2):learningRate('weight', lrMult)
+    m.fullModel:get(1):get(2):get(2):get(1):get(7):get(2):get(2):learningRate('bias', lrMult)
+  elseif p.modelType == 'hgr' then
+    m.fullModel:get(1):get(2):get(2):get(1):get(7):get(2):get(1):learningRate('weight', lrMult)
+    m.fullModel:get(1):get(2):get(2):get(1):get(7):get(2):get(1):learningRate('bias', lrMult)
+    m.fullModel:get(1):get(2):get(2):get(1):get(7):get(2):get(4):get(1):learningRate('weight', lrMult)
+    m.fullModel:get(1):get(2):get(2):get(1):get(7):get(2):get(4):get(1):learningRate('bias', lrMult)
+  end
+
+  local learningRates, weightDecays = m.fullModel:getOptimConfig(p.baseLearningRate, p.baseWeightDecay)
+  o.optimState_full.learningRates = learningRates
+  o.optimState_full.weightDecays = weightDecays
+end
+
+function changeWeightDecayForHashLayer(wdMult)
+
+  -- Image
+  m.fullModel:get(1):get(1):get(2):get(1):get(23):get(2):get(1):weightDecay('weight', wdMult)
+  m.fullModel:get(1):get(1):get(2):get(1):get(23):get(2):get(1):weightDecay('bias', wdMult)
+  m.fullModel:get(1):get(1):get(2):get(1):get(23):get(2):get(2):weightDecay('weight', wdMult)
+  m.fullModel:get(1):get(1):get(2):get(1):get(23):get(2):get(2):weightDecay('bias', wdMult)
+
+  -- Text
+  -- 2 hidden layer text model
+  -- m.fullModel:get(1):get(2):get(2):get(1):get(10):get(2):get(1):weightDecay('weight', wdMult)
+  -- m.fullModel:get(1):get(2):get(2):get(1):get(10):get(2):get(1):weightDecay('bias', wdMult)
+  -- m.fullModel:get(1):get(2):get(2):get(1):get(10):get(2):get(2):weightDecay('weight', wdMult)
+  -- m.fullModel:get(1):get(2):get(2):get(1):get(10):get(2):get(2):weightDecay('bias', wdMult)
+  -- 1 hidden layer text model
+  m.fullModel:get(1):get(2):get(2):get(1):get(7):get(2):get(1):weightDecay('weight', wdMult)
+  m.fullModel:get(1):get(2):get(2):get(1):get(7):get(2):get(1):weightDecay('bias', wdMult)
+  m.fullModel:get(1):get(2):get(2):get(1):get(7):get(2):get(2):weightDecay('weight', wdMult)
+  m.fullModel:get(1):get(2):get(2):get(1):get(7):get(2):get(2):weightDecay('bias', wdMult)
+
+  local learningRates, weightDecays = m.fullModel:getOptimConfig(p.baseLearningRate, p.baseWeightDecay)
+  o.optimState_full.learningRates = learningRates
+  o.optimState_full.weightDecays = weightDecays
 end
 
 function getModalitySpecifics(modality)
@@ -315,7 +452,7 @@ function getInputAndTarget(modality, trainBatch)
   end
 
   local batchSize = trainBatch.data[1]:size(1)
-  local trainSize = d.trainset[1]:size(1)
+  local trainSize = d.trainset[1].data:size(1)
   local trainEstimatorConst = trainSize / batchSize
   -- beta_im_pre = torch.sum(imPred, 1):view(-1):mul(trainEstimatorConst)
   -- beta_te_pre = torch.sum(tePred, 1):view(-1):mul(trainEstimatorConst)
@@ -377,15 +514,24 @@ function getInputAndTarget(modality, trainBatch)
   return input, target
 end
 
-function doOneEpochOnModality(modality, evalEpoch, logResults)
+local function addPointToPlotLine(tensor, val)
+  tensor = tensor:cat(torch.Tensor({val}))
+  return tensor
+end
+
+function doOneEpochOnModality(modality, logResults)
 
   local model, params, gradParams, optimState, pos_pairs, neg_pairs = getModalitySpecifics(modality)
 
   trainBatch = {}
 
+  local pos_perm, neg_perm
   if p.trainOnOneBatch == 1 then
     print("**************WARNING- Training on one batch only")
-    trainBatch = getBatch(pos_pairs, neg_pairs, modality)
+    trainBatch = getBatch_old(pos_pairs, neg_pairs, modality)
+  else
+    pos_perm = torch.randperm(d.pos_pairs_full:size(1))[{ { 1, p.posExamplesPerEpoch } }]:long()
+    neg_perm = torch.randperm(d.neg_pairs_full:size(1))[{ { 1, p.negExamplesPerEpoch } }]:long()
   end
 
   model:training()
@@ -396,7 +542,7 @@ function doOneEpochOnModality(modality, evalEpoch, logResults)
   for batchNum = 0, p.numBatches - 1 do
 
       if p.trainOnOneBatch == 0 then
-          trainBatch = getBatch(pos_pairs, neg_pairs, modality)
+          trainBatch = getBatch(batchNum, pos_pairs, neg_pairs, modality, pos_perm, neg_perm)
       end
 
       input, target = getInputAndTarget(modality, trainBatch)
@@ -431,23 +577,35 @@ function doOneEpochOnModality(modality, evalEpoch, logResults)
 
   end
 
-  statsPrint(string.format("=== %s ===Epoch %d", modality, torch.round(optimState.evalCounter / p.iterationsPerEpoch)), g.sf, g.sfv)
+  g.overallEpoch = torch.round(optimState.evalCounter / p.iterationsPerEpoch) -- TODO: Why round?
+
+  statsPrint(string.format("=== %s ===Epoch %d", modality, g.overallEpoch), g.sf, g.sfv)
   -- calcAndPrintHammingAccuracy(trainBatch, d.batch_sim_label, g.sfv) -- TODO: This is not very useful because it is only for the last batch in the epoch
   local avgEpochLoss = epochLoss / p.numBatches
   local crossModalEpochLoss = criterionLosses[1] / p.numBatches
+  local b1Loss = criterionLosses[2] / p.numBatches
+  local b2Loss = criterionLosses[3] / p.numBatches
+  local q1Loss = criterionLosses[4] / p.numBatches
+  local q2Loss = criterionLosses[5] / p.numBatches
   statsPrint(string.format("Avg Loss this epoch = %.2f", avgEpochLoss), g.sf, g.sfv)
   statsPrint(string.format("Cross Avg Loss this epoch = %.2f", crossModalEpochLoss), g.sf, g.sfv)
-  statsPrint(string.format("Bal1 Avg Loss this epoch = %.2f", criterionLosses[2] / p.numBatches), g.sf, g.sfv)
-  statsPrint(string.format("Bal2 Avg Loss this epoch = %.2f", criterionLosses[3] / p.numBatches), g.sf, g.sfv)
-  statsPrint(string.format("Quant1 Avg Loss this epoch = %.2f", criterionLosses[4] / p.numBatches), g.sf, g.sfv)
-  statsPrint(string.format("Quant2 Avg Loss this epoch = %.2f", criterionLosses[5] / p.numBatches), g.sf, g.sfv)
+  statsPrint(string.format("Bal1 Avg Loss this epoch = %.2f", b1Loss), g.sf, g.sfv)
+  statsPrint(string.format("Bal2 Avg Loss this epoch = %.2f", b2Loss), g.sf, g.sfv)
+  statsPrint(string.format("Quant1 Avg Loss this epoch = %.2f", q1Loss), g.sf, g.sfv)
+  statsPrint(string.format("Quant2 Avg Loss this epoch = %.2f", q2Loss), g.sf, g.sfv)
+  g.y_loss = addPointToPlotLine(g.y_loss, avgEpochLoss)
+  g.y_cross = addPointToPlotLine(g.y_cross, crossModalEpochLoss)
+  g.y_b1 = addPointToPlotLine(g.y_b1, b1Loss)
+  g.y_b2 = addPointToPlotLine(g.y_b2, b2Loss)
+  g.y_q1 = addPointToPlotLine(g.y_q1, q1Loss)
+  g.y_q2 = addPointToPlotLine(g.y_q2, q2Loss)
 
-  if logResults and evalEpoch % 50 == 0 then
-      local snapshotFile = g.snapshotDir .. "/snapshot_epoch_" .. epoch .. ".t7" 
+  if logResults and g.overallEpoch % 50 == 0 then
+      local snapshotFile = g.snapshotDir .. "/snapshot_epoch_" .. g.overallEpoch .. ".t7" 
       local snapshot = {}
       snapshot.params = params
       -- snapshot.params = torch.CudaTensor(params:size()):copy(params)
-      if evalEpoch % 100 == 0 then
+      if g.overallEpoch % 100 == 0 then
           -- snapshot.gparams = torch.CudaTensor(gradParams:size()):copy(gradParams)
           snapshot.gparams = gradParams
       end
@@ -457,13 +615,25 @@ function doOneEpochOnModality(modality, evalEpoch, logResults)
   return avgEpochLoss, crossModalEpochLoss
 end
 
-function runEverything(iterationsPerEpoch, modelType, lrMultForHashLayer, kNum, modality, simWeight, balanceWeight, quantWeight)
+function doRunEverything()
+  runEverything('mir',50,'hgr',5e4,'C',1,.015,0)
+end
 
-  loadParamsAndPackages(iterationsPerEpoch)
+-- function runEverything(datasetType, iterationsPerEpoch, modelType, lrMultForHashLayer, kNum, modality, simWeight, balanceWeight, quantWeight)
+function runEverything(datasetType, iterationsPerEpoch, modelType, lrMultForHashLayer, modality, simWeight, balanceWeight, quantWeight)
+
+  loadParamsAndPackages(datasetType, iterationsPerEpoch)
   loadFullModel(modelType, lrMultForHashLayer)
   loadData()
-  loadTrainAndValSubsets(kNum)
+  -- loadTrainAndValSubsets(kNum)
   getOptimStateAndShareParameters(modality)
+  -- changeWeightDecayForHashLayer(1e2)
   doGetCriterion(simWeight, balanceWeight, quantWeight)
+end
 
+function saveSnapshot(filename)
+    local snapshot = {}
+    snapshot.params, snapshot.gparams = m.fullModel:getParameters()
+    snapshot.g = g
+    torch.save(g.snapshotDir .. '/' .. filename .. '.t7', snapshot)
 end
