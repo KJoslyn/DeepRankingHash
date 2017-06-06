@@ -242,14 +242,32 @@ function getMirflickrCaffeTrainedTextModel()
     return model
 end
 
-function getTextModelForFullNet(L, k, type, lrMultForHashLayer)
+local function checkTableEquivalence(tb1, tb2)
+    if #tb1 ~= #tb2 then
+        return false
+    end
+    for i = 1,#tb1 do
+        if tb1[i] ~= tb2[i] then
+            return false
+        end
+    end
+    return true
+end
 
-    local model = getUntrainedTextModel()
+function getTextModelForFullNet(L, k, type, lrMultForHashLayer, layerSizes)
+
+    local model = getUntrainedTextModel(layerSizes)
     local snapshotFile 
     if p.datasetType == 'mir' then
         -- snapshotFile = '2hl_epoch250.t7'
         -- snapshotFile = 'sn1700.t7'
-        snapshotFile = 'epoch330.t7'
+        if not layerSizes then
+            snapshotFile = 'epoch330.t7'
+        elseif checkTableEquivalence(layerSizes, { 2048, 2048, 2048 }) then
+            snapshotFile = 'stats57.txt_best.t7'
+        else
+            print('Error in getTextModelForFullNet: Unrecognized model architecture')
+        end
     elseif p.datasetType == 'nus' then
         -- snapshotFile = '2hl_epoch100.t7'
         snapshotFile = '1hl_epoch100.t7'

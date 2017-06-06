@@ -106,14 +106,14 @@ function reloadAuxfPackage(pname)
   require(pkg)
 end
 
-function loadFullModel(modelType, lrMultForHashLayer, loadSiameseModels)
+function loadFullModel(modelType, XlrMult, IlrMult, loadSiameseModels, layerSizes)
 
   collectgarbage()
 
   p.modelType = modelType
 
-  m.imageClassifier, m.imageHasher = getImageModelForFullNet(p.L, p.k, modelType, lrMultForHashLayer)
-  m.textClassifier, m.textHasher = getTextModelForFullNet(p.L, p.k, modelType, lrMultForHashLayer)
+  m.imageClassifier, m.imageHasher = getImageModelForFullNet(p.L, p.k, modelType, IlrMult)
+  m.textClassifier, m.textHasher = getTextModelForFullNet(p.L, p.k, modelType, XlrMult, layerSizes)
   m.fullModel = createCombinedModel(m.imageHasher, m.textHasher)
 
   if loadSiameseModels then
@@ -334,78 +334,26 @@ function getOptimStateAndShareParameters(modality)
   end
 end
 
-function changeLearningRateForClassifier(lrMult)
-
-  if not classifierWeightIndices then
-    classifierWeightIndices = o.optimState_full.learningRates:eq(1)
-    hashLayerIndices = o.optimState_full.learningRates:ne(1)
+function getClassAndHashLayerIndices()
+  if not o.classifierWeightIndices then
+    o.classifierWeightIndices = o.optimState_full.learningRates:eq(1)
+    o.hashLayerIndices = o.optimState_full.learningRates:ne(1)
   end
-  o.optimState_full.learningRates[classifierWeightIndices] = lrMult
+end
 
+function changeLearningRateForClassifier(lrMult)
+  getClassAndHashLayerIndices()
+  o.optimState_full.learningRates[o.classifierWeightIndices] = lrMult
 end
 
 function changeLearningRateForHashLayer(lrMult)
-
-  -- Image
-  if p.modelType == 'hfc' then
-    m.fullModel:get(1):get(1):get(2):get(1):get(23):get(2):get(1):learningRate('weight', lrMult)
-    m.fullModel:get(1):get(1):get(2):get(1):get(23):get(2):get(1):learningRate('bias', lrMult)
-    m.fullModel:get(1):get(1):get(2):get(1):get(23):get(2):get(2):learningRate('weight', lrMult)
-    m.fullModel:get(1):get(1):get(2):get(1):get(23):get(2):get(2):learningRate('bias', lrMult)
-  elseif p.modelType == 'hgr' then
-    m.fullModel:get(1):get(1):get(2):get(1):get(23):get(2):get(1):learningRate('weight', lrMult)
-    m.fullModel:get(1):get(1):get(2):get(1):get(23):get(2):get(1):learningRate('bias', lrMult)
-    m.fullModel:get(1):get(1):get(2):get(1):get(23):get(2):get(4):get(1):learningRate('weight', lrMult)
-    m.fullModel:get(1):get(1):get(2):get(1):get(23):get(2):get(4):get(1):learningRate('bias', lrMult)
-  end
-
-  -- Text
-  -- 2 hidden layer text model
-  -- m.fullModel:get(1):get(2):get(2):get(1):get(10):get(2):get(1):learningRate('weight', lrMult)
-  -- m.fullModel:get(1):get(2):get(2):get(1):get(10):get(2):get(1):learningRate('bias', lrMult)
-  -- m.fullModel:get(1):get(2):get(2):get(1):get(10):get(2):get(2):learningRate('weight', lrMult)
-  -- m.fullModel:get(1):get(2):get(2):get(1):get(10):get(2):get(2):learningRate('bias', lrMult)
-  -- 1 hidden layer text model
-  if p.modelType == 'hfc' then
-    m.fullModel:get(1):get(2):get(2):get(1):get(7):get(2):get(1):learningRate('weight', lrMult)
-    m.fullModel:get(1):get(2):get(2):get(1):get(7):get(2):get(1):learningRate('bias', lrMult)
-    m.fullModel:get(1):get(2):get(2):get(1):get(7):get(2):get(2):learningRate('weight', lrMult)
-    m.fullModel:get(1):get(2):get(2):get(1):get(7):get(2):get(2):learningRate('bias', lrMult)
-  elseif p.modelType == 'hgr' then
-    m.fullModel:get(1):get(2):get(2):get(1):get(7):get(2):get(1):learningRate('weight', lrMult)
-    m.fullModel:get(1):get(2):get(2):get(1):get(7):get(2):get(1):learningRate('bias', lrMult)
-    m.fullModel:get(1):get(2):get(2):get(1):get(7):get(2):get(4):get(1):learningRate('weight', lrMult)
-    m.fullModel:get(1):get(2):get(2):get(1):get(7):get(2):get(4):get(1):learningRate('bias', lrMult)
-  end
-
-  local learningRates, weightDecays = m.fullModel:getOptimConfig(p.baseLearningRate, p.baseWeightDecay)
-  o.optimState_full.learningRates = learningRates
-  o.optimState_full.weightDecays = weightDecays
+  getClassAndHashLayerIndices()
+  o.optimState_full.learningRates[o.hashLayerIndices] = lrMult
 end
 
 function changeWeightDecayForHashLayer(wdMult)
-
-  -- Image
-  m.fullModel:get(1):get(1):get(2):get(1):get(23):get(2):get(1):weightDecay('weight', wdMult)
-  m.fullModel:get(1):get(1):get(2):get(1):get(23):get(2):get(1):weightDecay('bias', wdMult)
-  m.fullModel:get(1):get(1):get(2):get(1):get(23):get(2):get(2):weightDecay('weight', wdMult)
-  m.fullModel:get(1):get(1):get(2):get(1):get(23):get(2):get(2):weightDecay('bias', wdMult)
-
-  -- Text
-  -- 2 hidden layer text model
-  -- m.fullModel:get(1):get(2):get(2):get(1):get(10):get(2):get(1):weightDecay('weight', wdMult)
-  -- m.fullModel:get(1):get(2):get(2):get(1):get(10):get(2):get(1):weightDecay('bias', wdMult)
-  -- m.fullModel:get(1):get(2):get(2):get(1):get(10):get(2):get(2):weightDecay('weight', wdMult)
-  -- m.fullModel:get(1):get(2):get(2):get(1):get(10):get(2):get(2):weightDecay('bias', wdMult)
-  -- 1 hidden layer text model
-  m.fullModel:get(1):get(2):get(2):get(1):get(7):get(2):get(1):weightDecay('weight', wdMult)
-  m.fullModel:get(1):get(2):get(2):get(1):get(7):get(2):get(1):weightDecay('bias', wdMult)
-  m.fullModel:get(1):get(2):get(2):get(1):get(7):get(2):get(2):weightDecay('weight', wdMult)
-  m.fullModel:get(1):get(2):get(2):get(1):get(7):get(2):get(2):weightDecay('bias', wdMult)
-
-  local learningRates, weightDecays = m.fullModel:getOptimConfig(p.baseLearningRate, p.baseWeightDecay)
-  o.optimState_full.learningRates = learningRates
-  o.optimState_full.weightDecays = weightDecays
+  getClassAndHashLayerIndices()
+  o.optimState_full.weightDecays[o.hashLayerIndices] = wdMult
 end
 
 function getModalitySpecifics(modality)
@@ -616,14 +564,14 @@ function doOneEpochOnModality(modality, logResults)
 end
 
 function doRunEverything()
-  runEverything('mir',50,'hgr',5e4,'C',1,.015,0)
+  runEverything('mir',50,'hgr',5e4, { 2048, 2048, 2048 }, 'C',1,.015,0)
 end
 
 -- function runEverything(datasetType, iterationsPerEpoch, modelType, lrMultForHashLayer, kNum, modality, simWeight, balanceWeight, quantWeight)
-function runEverything(datasetType, iterationsPerEpoch, modelType, lrMultForHashLayer, modality, simWeight, balanceWeight, quantWeight)
+function runEverything(datasetType, iterationsPerEpoch, modelType, lrMultForHashLayer, layerSizes, modality, simWeight, balanceWeight, quantWeight)
 
   loadParamsAndPackages(datasetType, iterationsPerEpoch)
-  loadFullModel(modelType, lrMultForHashLayer)
+  loadFullModel(modelType, lrMultForHashLayer, false, layerSizes)
   loadData()
   -- loadTrainAndValSubsets(kNum)
   getOptimStateAndShareParameters(modality)
@@ -631,9 +579,11 @@ function runEverything(datasetType, iterationsPerEpoch, modelType, lrMultForHash
   doGetCriterion(simWeight, balanceWeight, quantWeight)
 end
 
-function saveSnapshot(filename)
+function saveSnapshot(filename, params, gradParams)
     local snapshot = {}
-    snapshot.params, snapshot.gparams = m.fullModel:getParameters()
+    -- snapshot.params, snapshot.gparams = m.fullModel:getParameters()
+    snapshot.params = params
+    snapshot.gradParams = gradParams
     snapshot.g = g
     torch.save(g.snapshotDir .. '/' .. filename .. '.t7', snapshot)
 end

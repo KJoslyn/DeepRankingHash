@@ -1,11 +1,11 @@
 require 'fullNet'
 
-function runAllParamsets(datasetType, paramFactorialSet, numEpochs, evalInterval, consecutiveStop)
+function runAllParamsets(datasetType, paramFactorialSet, numEpochs, evalInterval, iterationsPerEpoch, consecutiveStop)
 
     -- This is the main function to call
 
     -- TODO: This is set to a constant
-    local iterationsPerEpoch = 25
+    -- local iterationsPerEpoch = 25
 
     loadParamsAndPackages(datasetType, iterationsPerEpoch)
 
@@ -40,6 +40,10 @@ function recursiveRunAllParamsets(pfs_part, pfs_full, paramCount, numParams)
     if paramCount == numParams then
         -- printParams(pfs_full)
         if validateParams() then
+            -- If this starts a new parameter combination, increment the paramIdx (initialized to 0)
+            if p.numKFoldSplits == 1 or p.kFoldNum == 1 then
+                g.resultsParamIdx = g.resultsParamIdx + 1
+            end
             runWithParams(pfs_full)
         end
     else
@@ -47,11 +51,6 @@ function recursiveRunAllParamsets(pfs_part, pfs_full, paramCount, numParams)
         local paramName = thisParamset[1]
         local valueSet = thisParamset[2]
         for _, value in pairs(valueSet) do
-
-            -- If this starts a new parameter combination, increment the paramIdx (initialized to 0)
-            if p.numKFoldSplits == 1 or paramName == 'kfn' and value == 1 then
-                g.resultsParamIdx = g.resultsParamIdx + 1
-            end
 
             local oldValue = setParamValue(paramName, value)
             recursiveRunAllParamsets( { unpack(pfs_part, 2, #pfs_part) }, pfs_full, paramCount + 1, numParams)
@@ -155,7 +154,7 @@ function prepare()
     local simWeight = 1
 
     clearState()
-    loadFullModel(p.modelType, p.lrMultForHashLayer)
+    loadFullModel(p.modelType, p.lrMultForHashLayer, false, { 2048, 2048, 2048 })
     if d.trainset == nil then
         loadData()
     end
@@ -242,12 +241,22 @@ function trainAndEvaluateAutomatic(modality, numEpochs, evalInterval, paramFacto
   statsPrint(dateStr, g.meta, g.sf)
   local paramStr = printParams(paramFactorialSet, g.meta, g.sf)
   g.paramSettingsLegend[tostring(getLegendSize() + 1)] = paramStr
+  g.snapshotFilename = statsFileName
 
   local count = 0
   local epoch = 1
   local bestEpochLoss = 1e10 -- a large number
   local bestCmEpochLoss = 1e10 -- best cross-modal epoch loss
+  local bestIXv = 0
   while epoch <= numEpochs and count < p.consecutiveStop do
+
+    if epoch == 11 then
+        changeLearningRateForHashLayer(1e4)
+    elseif epoch == 51 then
+        changeLearningRateForHashLayer(5e3)
+    elseif epoch == 701 then
+        changeLearningRateForHashLayer(1e3)
+    end
 
     local epochLoss, cmEpochLoss = doOneEpochOnModality(modality, false)
     if cmEpochLoss < bestCmEpochLoss then
@@ -261,8 +270,13 @@ function trainAndEvaluateAutomatic(modality, numEpochs, evalInterval, paramFacto
     end
 
     if epoch % evalInterval == 0 then
-      doRunEvals(g.resultsParamIdx, resultsEvalIdx)
+      local IXt, XIt, IXv, XIv = doRunEvals(g.resultsParamIdx, resultsEvalIdx)
       resultsEvalIdx = resultsEvalIdx + 1
+      if IXv > 85 and IXv > bestIXv then
+        bestIXv = IXv
+        local name = g.snapshotFilename .. '_best'
+        saveSnapshot(name, o.params_full, o.gradParams_full)
+      end
     end
     epoch = epoch + 1
   end
@@ -270,6 +284,7 @@ function trainAndEvaluateAutomatic(modality, numEpochs, evalInterval, paramFacto
   statsPrint('****Stopped at epoch ' .. epoch, g.meta, g.sf)
   statsPrint(string.format('Best epoch (avg) loss = %.2f', bestEpochLoss), g.meta, g.sf)
   statsPrint(string.format('Best cross-modal epoch (avg) loss = %.2f\n\n', bestCmEpochLoss), g.meta, g.sf)
+  statsPrint(string.format('Best IXv = %.4f\n\n', bestIXv), g.meta, g.sf)
 
   io.close(g.sf)
 end
@@ -282,4 +297,5 @@ function doRunEvals(paramIdx, evalIdx)
     g.trainResultsMatrix[paramIdx][evalIdx] = g.trainResultsMatrix[paramIdx][evalIdx] + (XIt / den)
     g.valResultsMatrix[paramIdx][evalIdx] = g.valResultsMatrix[paramIdx][evalIdx] + (IXv / den)
     g.valResultsMatrix[paramIdx][evalIdx] = g.valResultsMatrix[paramIdx][evalIdx] + (XIv / den)
+    return IXt, XIt, IXv, XIv
 end
