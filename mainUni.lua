@@ -7,13 +7,11 @@ function getTestPFS()
     pfs = rap_pfs.pfs
 end
 
-function runAllParamsets(datasetType, modality, paramFactorialSet, numEpochs, plotNumEpochs, annealingThreshold, minAllowableLR)
+function runAllParamsets(datasetType, modality, paramFactorialSet, numEpochs, plotNumEpochs, minAllowableLR, saveAccThreshold, skipPlot)
 
     -- This is the main function to call
 
     loadParamsAndPackages(datasetType, modality, plotNumEpochs)
-
-    -- g.skipPlot = true -- Don't plot the class accuracy like usual
 
     local autoStatsDir
     if datasetType == 'mir' then
@@ -32,8 +30,10 @@ function runAllParamsets(datasetType, modality, paramFactorialSet, numEpochs, pl
     g.startStatsId = nil
 
     p.numEpochs = numEpochs
-    p.annealingThreshold = annealingThreshold or numEpochs + 1
+    p.annealingThreshold = 50 -- base value, but is a param that can be passed into paramFactorialSet ('at')
     p.minAllowableLR = minAllowableLR or .001
+    p.saveAccThreshold = saveAccThreshold or 88
+    g.skipPlot = skipPlot or false
 
     local numParamCombs = getNumParamCombs(paramFactorialSet)
     p.numKFoldSplits = getNumKFoldSplits(paramFactorialSet)
@@ -128,6 +128,8 @@ function getLongParamName(short)
         return 'batchSize'
     elseif short == 'wi' then
         return 'weightInit'
+    elseif short == 'at' then
+        return 'annealingThreshold'
     elseif short == 'kfn' then
         return 'kFoldNum'
     end
@@ -267,16 +269,23 @@ function trainAndEvaluateAutomatic(paramFactorialSet)
   while epoch <= p.numEpochs and continue do
 
     local loss, valAcc = doOneEpoch()
-    if loss < bestLoss then
-        bestLoss = loss
-        bestLossEpoch = epoch
-    end
-    if valAcc > bestValAcc then
-        bestValAcc = valAcc
-        bestValAccEpoch = epoch
-        count = 0
-    else
-        count = count + 1
+    -- Don't start tracking loss and accuracy until after epoch 5 when the initial random state is cleared
+    if epoch > 5 then
+        if loss < bestLoss then
+            bestLoss = loss
+            bestLossEpoch = epoch
+        end
+        if valAcc > bestValAcc then
+            bestValAcc = valAcc
+            bestValAccEpoch = epoch
+            count = 0
+            if valAcc > p.saveAccThreshold then
+                local name = g.snapshotFilename .. '_best'
+                saveSnapshot(name, o.params, o.gradParams)
+            end
+        else
+            count = count + 1
+        end
     end
 
     if count == p.annealingThreshold then
@@ -309,7 +318,7 @@ function trainAndEvaluateAutomatic(paramFactorialSet)
   g.avgLossMatrix[g.resultsParamIdx] = s.avgDataLoss
 
   statsPrint(string.format('***** Finished run'), g.meta, g.sf)
-  statsPrint(string.format('Best val accuracy = %.3f @ epoch %d', bestValAcc*100, bestValAccEpoch), g.meta, g.sf)
+  statsPrint(string.format('Best val accuracy = %.3f @ epoch %d', bestValAcc, bestValAccEpoch), g.meta, g.sf)
   statsPrint(string.format('Best training avg loss = %.3f @ epoch %d\n\n', bestLoss, bestLossEpoch), g.meta, g.sf)
 
   io.close(g.sf)

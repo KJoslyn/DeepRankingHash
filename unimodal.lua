@@ -388,7 +388,8 @@ function doOneEpoch()
     if p.modality == 'I' then
         save = epoch % 10 == 0
     else
-        save = epoch == 10 or epoch == 200 or epoch == 300 or epoch == 500 or epoch == 750 or epoch == 900 or epoch == 1000
+        -- save = epoch == 200 or epoch == 300 or epoch == 500 or epoch == 750 or epoch == 1000 or epoch == 1500 or epoch == 2000
+        save = false
     end
 
     if save then
@@ -401,7 +402,7 @@ function doOneEpoch()
             snapshotFilename = date.month .. "_" .. date.day .. "_" .. date.hour .. "_" .. date.min
         end
         snapshotFilename = snapshotFilename .. '_snapshot_epoch_' .. epoch
-        saveSnapshot(snapshotFilename)
+        saveSnapshot(snapshotFilename, params, gradParams)
     end
 
     return avgLoss, valClassAcc
@@ -433,7 +434,7 @@ function trainAndEvaluate(numEpochs, batchSize, lr, mom, wd)
     end
 end
 
-function saveSnapshot(filename)
+function saveSnapshot(filename, params, gradParams)
     local modalityDir
     if p.modality == 'I' then
         modalityDir = 'imageNet'
@@ -441,7 +442,9 @@ function saveSnapshot(filename)
         modalityDir = 'textNet'
     end
     local snapshot = {}
-    snapshot.params, snapshot.gparams = m.classifier:getParameters()
+    snapshot.params = params
+    snapshot.gradParams = gradParams
+    -- snapshot.params, snapshot.gparams = m.classifier:getParameters()
     snapshot.s = s
     torch.save(g.snapshotDir .. '/' .. modalityDir .. '/' .. filename .. '.t7', snapshot)
 end
