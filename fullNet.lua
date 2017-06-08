@@ -30,13 +30,14 @@ function loadParamsAndPackages(datasetType, iterationsPerEpoch)
   m = {} -- models
   g = {} -- other global variables
   o = {} -- optimStates and model parameters
+  s = {} -- stats for plotting
 
   -- Variable Parameters
   -- numEpochs = 200 -- 416 is max number without truncating an epoch. This is now an input parameter to trainAndEvaluate
   -- p.lrMultForHashLayer = 1e4 -- 1e4, 1e5, etc
   -- p.modelType = 'gr' -- 'hgr', 'fc', 'hfc'
-  p.L = 8
-  p.k = 4
+  -- p.L = 8
+  -- p.k = 4
   p.sim_label_type = 'fixed' -- 'variable'
   p.baseLearningRate = 1e-6 -- 1e-6
   p.baseLearningRateDecay = 0 -- 1e-3
@@ -88,16 +89,21 @@ function loadParamsAndPackages(datasetType, iterationsPerEpoch)
   reloadAuxfPackage('createModel')
   reloadAuxfPackage('map')
 
-  g.y_loss = torch.Tensor()
-  g.y_cross = torch.Tensor()
-  g.y_b1 = torch.Tensor()
-  g.y_b2 = torch.Tensor()
-  g.y_q1 = torch.Tensor()
-  g.y_q2 = torch.Tensor()
-  g.y_xit = torch.Tensor()
-  g.y_ixt = torch.Tensor()
-  g.y_xiv = torch.Tensor()
-  g.y_ixv = torch.Tensor()
+  resetGlobals()
+end
+
+function resetGlobals()
+    s.y_loss = torch.Tensor()
+    s.y_cross = torch.Tensor()
+    s.y_b1 = torch.Tensor()
+    s.y_b2 = torch.Tensor()
+    s.y_q1 = torch.Tensor()
+    s.y_q2 = torch.Tensor()
+    s.y_xit = torch.Tensor()
+    s.y_ixt = torch.Tensor()
+    s.y_xiv = torch.Tensor()
+    s.y_ixv = torch.Tensor()
+    g.plotStartEpoch = 1
 end
 
 function reloadAuxfPackage(pname)
@@ -106,14 +112,18 @@ function reloadAuxfPackage(pname)
   require(pkg)
 end
 
-function loadFullModel(modelType, XlrMult, IlrMult, loadSiameseModels, layerSizes)
+function loadFullModel(modelType, XHlrMult, IHlrMult, XClrMult, IClrMult, loadSiameseModels, layerSizes)
 
   collectgarbage()
 
   p.modelType = modelType
+  p.XHlrMult = XHlrMult
+  p.IHlrMult = IHlrMult
+  p.XClrMult = XClrMult
+  p.IClrMult = IClrMult
 
-  m.imageClassifier, m.imageHasher = getImageModelForFullNet(p.L, p.k, modelType, IlrMult)
-  m.textClassifier, m.textHasher = getTextModelForFullNet(p.L, p.k, modelType, XlrMult, layerSizes)
+  m.imageClassifier, m.imageHasher = getImageModelForFullNet(p.L, p.k, modelType, IHlrMult, IClrMult)
+  m.textClassifier, m.textHasher = getTextModelForFullNet(p.L, p.k, modelType, XHlrMult, XClrMult, layerSizes)
   m.fullModel = createCombinedModel(m.imageHasher, m.textHasher)
 
   if loadSiameseModels then
@@ -242,25 +252,8 @@ function trainAndEvaluate(modality, numEpochs, evalInterval, plot, arg1, arg2)
     --   changeLearningRateForHashLayer(5e3)
     -- end
 
-    if evalInterval and g.overallEpoch % evalInterval == 0 then
-
-      local IXt, XIt, IXv, XIv = runEvals()
-
-      g.y_ixt = g.y_ixt:cat(torch.Tensor({IXt}))
-      g.y_xit = g.y_xit:cat(torch.Tensor({XIt}))
-      g.y_ixv = g.y_ixv:cat(torch.Tensor({IXv}))
-      g.y_xiv = g.y_xiv:cat(torch.Tensor({XIv}))
-    elseif g.overallEpoch < evalInterval then
-      g.y_ixt = g.y_ixt:cat(torch.Tensor({.5}))
-      g.y_xit = g.y_xit:cat(torch.Tensor({.5}))
-      g.y_ixv = g.y_ixv:cat(torch.Tensor({.5}))
-      g.y_xiv = g.y_xiv:cat(torch.Tensor({.5}))
-    else
-      g.y_ixt = g.y_ixt:cat(torch.Tensor({g.y_ixt[g.overallEpoch - 1]}))
-      g.y_xit = g.y_xit:cat(torch.Tensor({g.y_xit[g.overallEpoch - 1]}))
-      g.y_ixv = g.y_ixv:cat(torch.Tensor({g.y_ixv[g.overallEpoch - 1]}))
-      g.y_xiv = g.y_xiv:cat(torch.Tensor({g.y_xiv[g.overallEpoch - 1]}))
-    end
+    local IXt, XIt, IXv, XIv = runEvals()
+    addPlotStats(g.overallEpoch, evalInterval, IXt, XIt, IXv, XIv)
 
     if plot then
       plotCrossModalLoss(g.overallEpoch)
@@ -272,6 +265,27 @@ function trainAndEvaluate(modality, numEpochs, evalInterval, plot, arg1, arg2)
     -- io.close(g.sfv)
   end
 
+end
+
+function addPlotStats(epoch, evalInterval, IXt, XIt, IXv, XIv)
+
+    if epoch % evalInterval == 0 then
+
+      s.y_ixt = s.y_ixt:cat(torch.Tensor({IXt}))
+      s.y_xit = s.y_xit:cat(torch.Tensor({XIt}))
+      s.y_ixv = s.y_ixv:cat(torch.Tensor({IXv}))
+      s.y_xiv = s.y_xiv:cat(torch.Tensor({XIv}))
+    elseif epoch < evalInterval then
+      s.y_ixt = s.y_ixt:cat(torch.Tensor({.5}))
+      s.y_xit = s.y_xit:cat(torch.Tensor({.5}))
+      s.y_ixv = s.y_ixv:cat(torch.Tensor({.5}))
+      s.y_xiv = s.y_xiv:cat(torch.Tensor({.5}))
+    else
+      s.y_ixt = s.y_ixt:cat(torch.Tensor({s.y_ixt[epoch - 1]}))
+      s.y_xit = s.y_xit:cat(torch.Tensor({s.y_xit[epoch - 1]}))
+      s.y_ixv = s.y_ixv:cat(torch.Tensor({s.y_ixv[epoch - 1]}))
+      s.y_xiv = s.y_xiv:cat(torch.Tensor({s.y_xiv[epoch - 1]}))
+    end
 end
 
 function doGetCriterion(simWeight, balanceWeight, quantWeight)
@@ -336,19 +350,39 @@ end
 
 function getClassAndHashLayerIndices()
   if not o.classifierWeightIndices then
-    o.classifierWeightIndices = o.optimState_full.learningRates:eq(1)
-    o.hashLayerIndices = o.optimState_full.learningRates:ne(1)
+    o.classifierWeightIndices = {}
+    o.classifierWeightIndices[I] = o.optimState_full.learningRates:eq(p.IClrMult)
+    o.classifierWeightIndices[X] = o.optimState_full.learningRates:eq(p.XClrMult)
+    -- o.classifierWeightIndices = o.optimState_full.learningRates:eq(1)
+    o.hashLayerIndices = {}
+    o.hashLayerIndices[I] = o.optimState_full.learningRates:eq(p.IHlrMult)
+    o.hashLayerIndices[X] = o.optimState_full.learningRates:eq(p.XHlrMult)
   end
 end
 
-function changeLearningRateForClassifier(lrMult)
+function changeLearningRateForClassifier(lrMult, modality)
   getClassAndHashLayerIndices()
-  o.optimState_full.learningRates[o.classifierWeightIndices] = lrMult
+  -- o.optimState_full.learningRates[o.classifierWeightIndices] = lrMult
+  if not modality or modality == 'X' then
+    o.optimState_full.learningRates[o.classifierWeightIndices[X]] = lrMult
+    p.XClrMult = lrMult
+  end
+  if not modality or modality == 'I' then
+    o.optimState_full.learningRates[o.classifierWeightIndices[I]] = lrMult
+    p.IClrMult = lrMult
+  end
 end
 
-function changeLearningRateForHashLayer(lrMult)
+function changeLearningRateForHashLayer(lrMult, modality)
   getClassAndHashLayerIndices()
-  o.optimState_full.learningRates[o.hashLayerIndices] = lrMult
+  if not modality or modality == 'X' then
+    o.optimState_full.learningRates[o.hashLayerIndices[X]] = lrMult
+    p.XHlrMult = lrMult
+  end
+  if not modality or modality == 'I' then
+    o.optimState_full.learningRates[o.hashLayerIndices[I]] = lrMult
+    p.IHlrMult = lrMult
+  end
 end
 
 function changeWeightDecayForHashLayer(wdMult)
@@ -541,12 +575,12 @@ function doOneEpochOnModality(modality, logResults)
   statsPrint(string.format("Bal2 Avg Loss this epoch = %.2f", b2Loss), g.sf, g.sfv)
   statsPrint(string.format("Quant1 Avg Loss this epoch = %.2f", q1Loss), g.sf, g.sfv)
   statsPrint(string.format("Quant2 Avg Loss this epoch = %.2f", q2Loss), g.sf, g.sfv)
-  g.y_loss = addPointToPlotLine(g.y_loss, avgEpochLoss)
-  g.y_cross = addPointToPlotLine(g.y_cross, crossModalEpochLoss)
-  g.y_b1 = addPointToPlotLine(g.y_b1, b1Loss)
-  g.y_b2 = addPointToPlotLine(g.y_b2, b2Loss)
-  g.y_q1 = addPointToPlotLine(g.y_q1, q1Loss)
-  g.y_q2 = addPointToPlotLine(g.y_q2, q2Loss)
+  s.y_loss = addPointToPlotLine(s.y_loss, avgEpochLoss)
+  s.y_cross = addPointToPlotLine(s.y_cross, crossModalEpochLoss)
+  s.y_b1 = addPointToPlotLine(s.y_b1, b1Loss)
+  s.y_b2 = addPointToPlotLine(s.y_b2, b2Loss)
+  s.y_q1 = addPointToPlotLine(s.y_q1, q1Loss)
+  s.y_q2 = addPointToPlotLine(s.y_q2, q2Loss)
 
   if logResults and g.overallEpoch % 50 == 0 then
       local snapshotFile = g.snapshotDir .. "/snapshot_epoch_" .. g.overallEpoch .. ".t7" 
@@ -564,14 +598,20 @@ function doOneEpochOnModality(modality, logResults)
 end
 
 function doRunEverything()
-  runEverything('mir',50,'hgr',5e4, { 2048, 2048, 2048 }, 'C',1,.015,0)
+  -- runEverything('mir',50,'hgr', 5.001e4, 5e4, 1.001, 1, { 2048, 2048, 2048 }, 'C',1,.015,0)
+  runEverything('mir',50,'hgr', 5e4, { 2048, 2048, 2048 }, 'C',1,.015,0)
 end
 
--- function runEverything(datasetType, iterationsPerEpoch, modelType, lrMultForHashLayer, kNum, modality, simWeight, balanceWeight, quantWeight)
+-- function runEverything(datasetType, iterationsPerEpoch, modelType, XHlrMult, IHlrMult, XClrMult, IClrMult, layerSizes, modality, simWeight, balanceWeight, quantWeight)
 function runEverything(datasetType, iterationsPerEpoch, modelType, lrMultForHashLayer, layerSizes, modality, simWeight, balanceWeight, quantWeight)
 
+  local XHlrMult = lrMultForHashLayer
+  local IHlrMult = lrMultForHashLayer
+  local XClrMult = 1
+  local XHlrMult = 1
+
   loadParamsAndPackages(datasetType, iterationsPerEpoch)
-  loadFullModel(modelType, lrMultForHashLayer, false, layerSizes)
+  loadFullModel(modelType, XHlrMult, IHlrMult, XClrMult, IClrMult, false, layerSizes)
   loadData()
   -- loadTrainAndValSubsets(kNum)
   getOptimStateAndShareParameters(modality)
@@ -584,6 +624,6 @@ function saveSnapshot(filename, params, gradParams)
     -- snapshot.params, snapshot.gparams = m.fullModel:getParameters()
     snapshot.params = params
     snapshot.gradParams = gradParams
-    snapshot.g = g
+    snapshot.s = s
     torch.save(g.snapshotDir .. '/' .. filename .. '.t7', snapshot)
 end

@@ -359,16 +359,16 @@ local function getPlotLines(epoch)
     local elapsedEpochs = epoch - (g.plotStartEpoch - 1) -- startEpoch should be one greater than a multiple of g.plotNumEpochs
 
     local x = torch.linspace(g.plotStartEpoch, epoch, elapsedEpochs)
-    local y_loss = normalizePlotLine(g.y_loss)
-    local y_cross = normalizePlotLine(g.y_cross)
-    local y_b1 = normalizePlotLine(g.y_b1)
-    local y_b2 = normalizePlotLine(g.y_b2)
-    local y_q1 = normalizePlotLine(g.y_q1)
-    local y_q2 = normalizePlotLine(g.y_q2)
-    local y_ixt = g.y_ixt
-    local y_xit = g.y_xit
-    local y_ixv = g.y_ixv
-    local y_xiv = g.y_xiv
+    local y_loss = normalizePlotLine(s.y_loss)
+    local y_cross = normalizePlotLine(s.y_cross)
+    local y_b1 = normalizePlotLine(s.y_b1)
+    local y_b2 = normalizePlotLine(s.y_b2)
+    local y_q1 = normalizePlotLine(s.y_q1)
+    local y_q2 = normalizePlotLine(s.y_q2)
+    local y_ixt = s.y_ixt
+    local y_xit = s.y_xit
+    local y_ixv = s.y_ixv
+    local y_xiv = s.y_xiv
 
     local lines = {}
     local bw = m.criterion.weights[2]
@@ -426,11 +426,11 @@ function plotCrossModalLoss_old(epoch)
     local elapsedEpochs = epoch - (g.plotStartEpoch - 1) -- startEpoch should be one greater than a multiple of g.plotNumEpochs
 
     local x = torch.linspace(g.plotStartEpoch, epoch, elapsedEpochs)
-    local y_loss = g.y_loss
-    local y_ixt = g.y_ixt
-    local y_xit = g.y_xit
-    local y_ixv = g.y_ixv
-    local y_xiv = g.y_xiv
+    local y_loss = s.y_loss
+    local y_ixt = s.y_ixt
+    local y_xit = s.y_xit
+    local y_ixv = s.y_ixv
+    local y_xiv = s.y_xiv
 
     if not g.plotFilename then
         local date = os.date("*t", os.time())
