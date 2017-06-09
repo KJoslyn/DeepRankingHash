@@ -4,7 +4,7 @@
 -- loadParamsAndPackages(datasetType, modality) -- 'mir' or 'nus', 'I', or 'X'
 -- resetGlobals()
 -- loadVariableTrainingParams(baseLearningRate, baseWeightDecay, baseLearningRateDecay, mom)
--- loadModelAndOptimState()
+-- loadModelAndOptimState() - set p.layerSizes if using custom text model
 -- loadData() -- uses dataLoader.lua
 -- optional: loadModelSnapshot -- from createModel.lua
 -- trainAndEvaluate(numEpochs, batchSize)
@@ -88,7 +88,7 @@ function loadParamsAndPackages(datasetType, modality, plotNumEpochs)
     local snapshotDatasetDir
     if datasetType == 'mir' then
         p.numClasses = 24
-        p.tagDim = 1075
+        p.tagDim = 1075 -- Change tagDim if using PCA
         snapshotDatasetDir = '/mirflickr'
         g.datasetPath = '/home/kjoslyn/datasets/mirflickr/'
         g.evalTrainAccEpochs = 5
