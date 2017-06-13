@@ -18,7 +18,7 @@ function loadStandardPackages()
 
 end -- end loadPackages()
 
-function loadParamsAndPackages(datasetType, iterationsPerEpoch)
+function loadParamsAndPackages(datasetType, iterationsPerEpoch, usePretrainedImageFeatures, L, k)
 
   if not nn then
     loadStandardPackages()
@@ -36,8 +36,12 @@ function loadParamsAndPackages(datasetType, iterationsPerEpoch)
   -- numEpochs = 200 -- 416 is max number without truncating an epoch. This is now an input parameter to trainAndEvaluate
   -- p.lrMultForHashLayer = 1e4 -- 1e4, 1e5, etc
   -- p.modelType = 'gr' -- 'hgr', 'fc', 'hfc'
-  -- p.L = 8
-  -- p.k = 4
+
+  -- In main.lua, these are params in pfs. Thus, loadParamsAndPackages may be called without these params in main.lua.
+  p.L = L -- 8 
+  p.k = k -- 4
+
+  p.usePretrainedImageFeatures = usePretrainedImageFeatures
   p.sim_label_type = 'fixed' -- 'variable'
   p.baseLearningRate = 1e-6 -- 1e-6
   p.baseLearningRateDecay = 0 -- 1e-3
@@ -122,7 +126,11 @@ function loadFullModel(modelType, XHlrMult, IHlrMult, XClrMult, IClrMult, loadSi
   p.XClrMult = XClrMult
   p.IClrMult = IClrMult
 
-  m.imageClassifier, m.imageHasher = getImageModelForFullNet(p.L, p.k, modelType, IHlrMult, IClrMult)
+  if not p.usePretrainedImageFeatures then
+    m.imageClassifier, m.imageHasher = getImageModelForFullNet(p.L, p.k, modelType, IHlrMult, IClrMult)
+  else
+    m.imageHasher = getHashLayer(4096, modelType, p.L, p.k, IHlrMult)
+  end
   m.textClassifier, m.textHasher = getTextModelForFullNet(p.L, p.k, modelType, XHlrMult, XClrMult, layerSizes)
   m.fullModel = createCombinedModel(m.imageHasher, m.textHasher)
 
@@ -134,30 +142,38 @@ end
 
 function loadData() 
 
-  d.trainset = {}
-  d.trainset[I] = {}
-  d.trainset[X] = {}
-  d.valset = {}
-  d.valset[I] = {}
-  d.valset[X] = {}
-  d.testset = {}
-  d.testset[I] = {}
-  d.testset[X] = {}
-  d.pretrainset = {}
-  d.pretrainset[I] = {}
-  d.pretrainset[X] = {}
+  if p.usePretrainedImageFeatures then
+    local data = torch.load(g.datasetPath .. 'alexNetFeatures_deep.t7')
+    d.trainset = data.trainset
+    d.valset = data.valset
+    d.testset = data.testset
+    d.pretrainset = data.pretrainset
+  else
+    d.trainset = {}
+    d.trainset[I] = {}
+    d.trainset[X] = {}
+    d.valset = {}
+    d.valset[I] = {}
+    d.valset[X] = {}
+    d.testset = {}
+    d.testset[I] = {}
+    d.testset[X] = {}
+    d.pretrainset = {}
+    d.pretrainset[I] = {}
+    d.pretrainset[X] = {}
 
-  local imageRootPath = g.datasetPath .. 'ImageData'
-  d.dataset = imageLoader{path=imageRootPath, sampleSize={3,227,227}, splitFolders={'training', 'pretraining', 'val', 'query'}}
+    local imageRootPath = g.datasetPath .. 'ImageData'
+    d.dataset = imageLoader{path=imageRootPath, sampleSize={3,227,227}, splitFolders={'training', 'pretraining', 'val', 'query'}}
 
-  d.trainset[I].data, d.trainset[I].label = d.dataset:getBySplit('training', 'I', 1, d.dataset:sizeTrain())
-  d.trainset[X].data, d.trainset[X].label = d.dataset:getBySplit('training', 'X', 1, d.dataset:sizeTrain())
+    d.trainset[I].data, d.trainset[X].data, d.trainset[I].label = d.dataset:getBySplit('training', 'B', 1, d.dataset:sizeTrain())
+    d.trainset[X].label = d.trainset[I].label
 
-  d.valset[I].data, d.valset[I].label = d.dataset:getBySplit('val', 'I', 1, d.dataset:sizeVal())
-  d.valset[X].data, d.valset[X].label = d.dataset:getBySplit('val', 'X', 1, d.dataset:sizeVal())
+    d.valset[I].data, d.valset[X].data, d.valset[I].label = d.dataset:getBySplit('val', 'B', 1, d.dataset:sizeVal())
+    d.valset[X].label = d.valset[I].label
 
-  d.testset[I].data, d.testset[I].label = d.dataset:getBySplit('query', 'I', 1, d.dataset:sizeTest())
-  d.testset[X].data, d.testset[X].label = d.dataset:getBySplit('query', 'X', 1, d.dataset:sizeTest())
+    d.testset[I].data, d.testset[X].data, d.testset[I].label = d.dataset:getBySplit('query', 'B', 1, d.dataset:sizeTest())
+    d.testset[X].label = d.testset[I].label
+  end
 
   local pairs = torch.load(g.datasetPath .. 'crossModalPairs.t7')
   d.pos_pairs_full = pairs.pos_pairs
@@ -176,15 +192,17 @@ function runEvals()
   statsPrint(string.format("Avg 0.5Dist I = %.3f", getSoftMaxAvgDistFromOneHalf(I)), g.sf, g.sfv)
   statsPrint(string.format("Avg 0.5Dist X = %.3f", getSoftMaxAvgDistFromOneHalf(X)), g.sf, g.sfv)
 
-  local imageAccuracy = getClassAccuracyForModality(I)
   local textAccuracy = getClassAccuracyForModality(X)
-  statsPrint(string.format('Train Image Classification Acc: %.2f', imageAccuracy), g.sf, g.sfv)
   statsPrint(string.format('Train Text Classification Acc: %.2f', textAccuracy), g.sf, g.sfv)
-
   local batchTextClassAcc = getClassAccuracy(trainBatch.data[X], trainBatch.label[X])
-  local batchImageClassAcc = getClassAccuracy(trainBatch.data[I], trainBatch.label[I])-- TODO: This is not very useful because it is only for the last batch in the epoch
   statsPrint(string.format("Batch Text Classification Acc = %.2f", batchTextClassAcc), g.sfv)
-  statsPrint(string.format("Batch Image Classification Acc = %.2f", batchImageClassAcc), g.sfv)
+
+  if not p.usePretrainedImageFeatures then
+    local imageAccuracy = getClassAccuracyForModality(I)
+    statsPrint(string.format('Train Image Classification Acc: %.2f', imageAccuracy), g.sf, g.sfv)
+    local batchImageClassAcc = getClassAccuracy(trainBatch.data[I], trainBatch.label[I])-- TODO: This is not very useful because it is only for the last batch in the epoch
+    statsPrint(string.format("Batch Image Classification Acc = %.2f", batchImageClassAcc), g.sfv)
+  end
 
   -- Clear codes to signal need to compute the hash codes again
   d.trainset[I].codes = nil
@@ -203,11 +221,18 @@ function runEvals()
   -- local XXt = calcMAP(X, X, 'training', 'training', true)
   -- local IIv = calcMAP(I, I, 'val', 'val', true)
   -- local XXv = calcMAP(X, X, 'val', 'val', true)
-  local classesTo = {'training','pretraining','val'}
-  local IXt = calcMAP(I, X, 'training', classesTo, true)
-  local XIt = calcMAP(X, I, 'training', classesTo, true)
-  local IXv = calcMAP(I, X, 'val', classesTo, true)
-  local XIv = calcMAP(X, I, 'val', classesTo, true)
+
+  local classesTo
+  if p.datasetType == 'mir' then
+    classesTo = {'training','val','pretraining'}
+  else
+    classesTo = {'training','val'}
+  end
+
+  local IXt, IXt_time = calcMAP(I, X, 'training', classesTo, true)
+  local XIt, XIt_time = calcMAP(X, I, 'training', classesTo, true)
+  local IXv, IXv_time = calcMAP(I, X, 'val', classesTo, true)
+  local XIv, XIv_time = calcMAP(X, I, 'val', classesTo, true)
   local IIt = calcMAP(I, I, 'training', classesTo, true)
   local XXt = calcMAP(X, X, 'training', classesTo, true)
   local IIv = calcMAP(I, I, 'val', classesTo, true)
@@ -221,6 +246,11 @@ function runEvals()
   statsPrint(string.format("I -> X val MAP = %.2f", IXv), g.sf, g.sfv)
   statsPrint(string.format("X -> X val MAP = %.2f", XXv), g.sf, g.sfv)
   statsPrint(string.format("I -> I val MAP = %.2f", IIv), g.sf, g.sfv)
+
+  print(string.format("X -> I train MAP time = %.2f", XIt_time))
+  print(string.format("I -> X train MAP time = %.2f", IXt_time))
+  print(string.format("X -> I val MAP time = %.2f", XIv_time))
+  print(string.format("I -> X val MAP time = %.2f", IXv_time))
 
   return IXt, XIt, IXv, XIv
 
@@ -252,8 +282,10 @@ function trainAndEvaluate(modality, numEpochs, evalInterval, plot, arg1, arg2)
     --   changeLearningRateForHashLayer(5e3)
     -- end
 
-    local IXt, XIt, IXv, XIv = runEvals()
-    addPlotStats(g.overallEpoch, evalInterval, IXt, XIt, IXv, XIv)
+    if g.overallEpoch % evalInterval == 0 then
+      local IXt, XIt, IXv, XIv = runEvals()
+      addPlotStats(g.overallEpoch, evalInterval, IXt, XIt, IXv, XIv)
+    end
 
     if plot then
       plotCrossModalLoss(g.overallEpoch)
@@ -597,26 +629,39 @@ function doOneEpochOnModality(modality, logResults)
   return avgEpochLoss, crossModalEpochLoss
 end
 
-function doRunEverything()
-  -- runEverything('mir',50,'hgr', 5.001e4, 5e4, 1.001, 1, { 2048, 2048, 2048 }, 'C',1,.015,0)
-  runEverything('mir',50,'hgr', 5e4, { 2048, 2048, 2048 }, 'C',1,.015,0)
-end
+function runEverything()
 
--- function runEverything(datasetType, iterationsPerEpoch, modelType, XHlrMult, IHlrMult, XClrMult, IClrMult, layerSizes, modality, simWeight, balanceWeight, quantWeight)
-function runEverything(datasetType, iterationsPerEpoch, modelType, lrMultForHashLayer, layerSizes, modality, simWeight, balanceWeight, quantWeight)
+  -- These are the hardcoded variable params. Need to reload this file every time one changes.
+
+  local datasetType = 'nus'
+  local iterationsPerEpoch = 50
+  local usePretrainedImageFeatures = true
+  local L = 8
+  local k = 4
+  local modelType = 'hgr'
+  local lrMultForHashLayer = 5e4
+  -- local layerSizes = { 2048, 2048, 2048 }
+  local layerSizes = { 't', 2048 }
+  local modality = 'C'
+  local simWeight = 1
+  local balanceWeight = .015
+  local quantWeight = 0
 
   local XHlrMult = lrMultForHashLayer
   local IHlrMult = lrMultForHashLayer
   local XClrMult = 1
-  local XHlrMult = 1
+  local IClrMult = 1
 
-  loadParamsAndPackages(datasetType, iterationsPerEpoch)
+  loadParamsAndPackages(datasetType, iterationsPerEpoch, usePretrainedImageFeatures, L, k)
   loadFullModel(modelType, XHlrMult, IHlrMult, XClrMult, IClrMult, false, layerSizes)
   loadData()
   -- loadTrainAndValSubsets(kNum)
   getOptimStateAndShareParameters(modality)
   -- changeWeightDecayForHashLayer(1e2)
   doGetCriterion(simWeight, balanceWeight, quantWeight)
+
+  -- For illustration only
+  -- trainAndEvaluate(modality, numEpochs, evalInterval, plot, arg1, arg2)
 end
 
 function saveSnapshot(filename, params, gradParams)

@@ -123,6 +123,13 @@ end
 
 function getImageModelForFullNet(L, k, type, lrMultForHashLayer)
 
+    local model = getFineTunedImageModel()
+    model.modules[#model.modules] = nil -- This is messy, but need to remove sigmoid layer for now. Will add it back later.
+    return createClassifierAndHasher(model, 4096, L, k, type, lrMultForHashLayer)
+end
+
+function getFineTunedImageModel()
+
     local model = getImageModel()
 
     local snapshotFile 
@@ -137,8 +144,7 @@ function getImageModelForFullNet(L, k, type, lrMultForHashLayer)
     -- local snapshotFile = 'snapshot_epoch_500.t7'
     -- loadModelSnapshot(model, snapshot2ndLevelDir, snapshotFile)
 
-    model.modules[#model.modules] = nil -- This is messy, but need to remove sigmoid layer for now. Will add it back later.
-    return createClassifierAndHasher(model, 4096, L, k, type, lrMultForHashLayer)
+    return model
 end
 
 function table.shallow_copy(t)
@@ -316,13 +322,7 @@ function getTextModelForFullNet(L, k, type, lrMultForHashLayer, lrMultForClassLa
     return createClassifierAndHasher(model, 2048, L, k, type, lrMultForHashLayer)
 end
 
-function createClassifierAndHasher(model, prevLayerSize, L, k, type, lrMultForHashLayer)
-
-    -- Grab classification layer and remove it
-    local classLayer = nn.Sequential()
-    classLayer:add(model.modules[#model.modules])
-    classLayer:add(nn.Sigmoid())
-    model.modules[#model.modules] = nil
+function getHashLayer(prevLayerSize, type, L, k, lrMultForHashLayer)
 
     local hashLayer
     if type == 'hfc' then
@@ -336,6 +336,19 @@ function createClassifierAndHasher(model, prevLayerSize, L, k, type, lrMultForHa
     else
         print('ERROR: Unrecognized hash layer type')
     end
+
+    return hashLayer
+end
+
+function createClassifierAndHasher(model, prevLayerSize, L, k, type, lrMultForHashLayer)
+
+    -- Grab classification layer and remove it
+    local classLayer = nn.Sequential()
+    classLayer:add(model.modules[#model.modules])
+    classLayer:add(nn.Sigmoid())
+    model.modules[#model.modules] = nil
+
+    local hashLayer = getHashLayer(prevLayerSize, type, L, k, lrMultForHashLayer)
 
     local concat = nn.ConcatTable()
     concat:add(classLayer)

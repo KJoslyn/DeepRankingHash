@@ -1,13 +1,13 @@
 require 'fullNet'
 
-function runAllParamsets(datasetType, paramFactorialSet, numEpochs, evalInterval, iterationsPerEpoch, consecutiveStop)
+function runAllParamsets(datasetType, paramFactorialSet, numEpochs, evalInterval, iterationsPerEpoch, usePretrainedImageFeatures, consecutiveStop)
 
     -- This is the main function to call
 
     -- TODO: This is set to a constant
     -- local iterationsPerEpoch = 25
 
-    loadParamsAndPackages(datasetType, iterationsPerEpoch)
+    loadParamsAndPackages(datasetType, iterationsPerEpoch, usePretrainedImageFeatures)
 
     local autoStatsDir
     if datasetType == 'mir' then
@@ -317,9 +317,8 @@ function trainAndEvaluateAutomatic(modality, numEpochs, evalInterval, paramFacto
         -- count = count + 1
     end
 
-    local IXt, XIt, IXv, XIv
     if epoch % evalInterval == 0 then
-      IXt, XIt, IXv, XIv = doRunEvals(g.resultsParamIdx, resultsEvalIdx)
+      local IXt, XIt, IXv, XIv = doRunEvals(g.resultsParamIdx, resultsEvalIdx)
       resultsEvalIdx = resultsEvalIdx + 1
       local avgV = (IXv + XIv) / 2
       if avgV > bestAvgV then
@@ -336,9 +335,10 @@ function trainAndEvaluateAutomatic(modality, numEpochs, evalInterval, paramFacto
       else
         count = count + 1
       end
+      
+      addPlotStats(epoch, evalInterval, IXt, XIt, IXv, XIv)
     end
 
-    addPlotStats(epoch, evalInterval, IXt, XIt, IXv, XIv)
     -- plotCrossModalLoss(epoch) -- TODO: This sometimes causes the program to crash. Plotting at end instead.
   end
 

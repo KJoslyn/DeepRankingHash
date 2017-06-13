@@ -10,33 +10,30 @@ end
 
 function getHashCodes(data)
 
+    -- collectgarbage()    
+    -- return computeInBatches(calcHashCodes, torch.LongTensor(data:size(1), p.L), data, nil)
     return computeInBatches(calcHashCodes, torch.CudaLongTensor(data:size(1), p.L), data, nil)
 end
 
 function getClassAccuracy(data, labels)
 
-    roundedOutput = computeInBatches(calcRoundedClassifierOutput, torch.CudaTensor(data:size(1), p.numClasses), data)
+    local roundedOutput = computeInBatches(calcRoundedClassifierOutput, torch.CudaTensor(data:size(1), p.numClasses), data)
 
-    numInstances = data:size(1)
-    dotProd = torch.CudaTensor(numInstances)
+    local numInstances = data:size(1)
+    local dotProd = torch.CudaTensor(numInstances)
     for i = 1, numInstances do
         dotProd[i] = torch.dot(roundedOutput[i], labels[i])
     end
-    zero = torch.zeros(numInstances):cuda()
-    numCorrect = dotProd:gt(zero):sum()
-    accuracy = numCorrect * 100 / numInstances
+    local zero = torch.zeros(numInstances):cuda()
+    local numCorrect = dotProd:gt(zero):sum()
+    local accuracy = numCorrect * 100 / numInstances
     
     return accuracy
 end
 
 function getClassAccuracyForModality(modality)
-    if modality == I then
-        data = d.trainset[I].data
-        labels = d.trainset[I].label:float()
-    else
-        data = d.trainset[X].data
-        labels = d.trainset[X].label:float()
-    end
+    local data = d.trainset[modality].data
+    local labels = d.trainset[modality].label:float()
     return getClassAccuracy(data, labels:cuda())
 end
 
@@ -47,15 +44,16 @@ end
 function calcRoundedClassifierOutput(data) 
 
     if data:size(2) == 3 then -- Image modality
-        return m.imageClassifier:cuda():forward(data:cuda()):round()
+        -- return m.imageClassifier:cuda():forward(data:cuda()):round()
+        return m.imageClassifier:forward(data:cuda()):round()
     else -- Text modality
-        return m.textClassifier:cuda():forward(data:cuda()):round()
+        return m.textClassifier:forward(data:cuda()):round()
     end
 end
 
 function calcRawPredictions(data)
 
-    if data:size(2) == 3 then -- Image modality
+    if data:size(2) == 3 or data:size(2) == 4096 then -- Image modality. First is raw pixels, second is alexNet features
         return m.imageHasher:forward(data:cuda())
     else -- Text modality
         return m.textHasher:forward(data:cuda())
@@ -64,10 +62,13 @@ end
 
 function calcHashCodes(data)
 
-    pred = calcRawPredictions(data)
+    collectgarbage()
+    local pred = calcRawPredictions(data)
 
-    reshapedInput = nn.Reshape(p.L,p.k):cuda():forward(pred)
-    maxs, indices = torch.max(reshapedInput, 3)
+    local reshapedInput = nn.Reshape(p.L,p.k):cuda():forward(pred)
+    local maxs, indices = torch.max(reshapedInput, 3)
+    -- indices = indices:reshape(indices:size(1), indices:size(2))
+    -- indices = torch.LongTensor(indices:size(1), indices:size(2)):copy(indices)
     return indices
 end
 
@@ -75,13 +76,14 @@ function computeInBatches(computeFunction, output, data)
 
     if data:size(2) == 3 then -- Image modality
         local N = data:size(1)
-        local batchSize = 128
+        local batchSize = 2000
         local numBatches = torch.ceil(N / batchSize)
         for b = 0, numBatches - 1 do
             local startIndex = b * batchSize + 1
             local endIndex = math.min((b + 1) * batchSize, N)
-            batch = data[{{ startIndex, endIndex }}]
-            output[{{ startIndex, endIndex}}] = computeFunction(batch)
+            local batch = data[{{ startIndex, endIndex }}]
+            -- output[{{ startIndex, endIndex}}] = computeFunction(batch)
+            output[{{ startIndex, endIndex}}]:copy(computeFunction(batch))
         end
         return output    
     else -- Text modality
@@ -118,7 +120,7 @@ end
 
 function getCodesAndLabelsForModalityAndClass(modality, class, usePrecomputedCodes)
 
-    if class == 'pretraining' and p.datasetType == 'nus' then
+    if class == 'pretraining' and p.datasetType == 'nus' and not p.usePretrainedImageFeatures then
         return calcPretrainsetHashCodesForNuswide(modalityChar)
     end
 
@@ -165,6 +167,7 @@ function getCodesAndLabels(modality, classArg, usePrecomputedCodes)
 
     -- local allData = torch.FloatTensor() -- TODO: Correct?
     local allCodes = torch.CudaLongTensor()
+    -- local allCodes = torch.LongTensor()
     local allLabels = torch.FloatTensor()
     for c = 1, #classes do
         local class = classes[c]
@@ -178,20 +181,20 @@ end
 
 function getDistanceAndSimilarityForMAP(queryCodes, databaseCodes, queryLabels, databaseLabels)
 
-    queryLabels = queryLabels:cuda()
-    databaseLabels = databaseLabels:cuda()
+    local queryLabels = queryLabels:cuda()
+    local databaseLabels = databaseLabels:cuda()
 
-    numQueries = queryCodes:size(1)
-    numDB = databaseCodes:size(1)
+    local numQueries = queryCodes:size(1)
+    local numDB = databaseCodes:size(1)
 
-    D = torch.CudaByteTensor(numQueries, numDB)
-    S = torch.CudaTensor(numQueries, numDB)
-    sumAPs = 0
+    local D = torch.CudaByteTensor(numQueries, numDB)
+    local S = torch.CudaTensor(numQueries, numDB)
+    local sumAPs = 0
     for q = 1,numQueries do
-        queryCodeRep = torch.expand(queryCodes[q]:reshape(p.L,1), p.L, numDB):transpose(1,2)
+        local queryCodeRep = torch.expand(queryCodes[q]:reshape(p.L,1), p.L, numDB):transpose(1,2)
         D[q] = torch.ne(queryCodeRep, databaseCodes):sum(2)
 
-        queryLabelRep = torch.expand(queryLabels[q]:reshape(p.numClasses,1), p.numClasses, numDB):transpose(1,2)
+        local queryLabelRep = torch.expand(queryLabels[q]:reshape(p.numClasses,1), p.numClasses, numDB):transpose(1,2)
         S[q] = torch.cmul(queryLabelRep, databaseLabels):max(2)
     end
 
@@ -212,6 +215,9 @@ end
 
 function calcMAP(modalityFrom, modalityTo, classesFrom, classesTo, usePrecomputedCodes)
 
+    local timer = torch.Timer()
+    timer:resume()
+
     m.fullModel:evaluate()
 
     local queryCodes, queryLabels = getCodesAndLabels(modalityFrom, classesFrom, usePrecomputedCodes)
@@ -222,7 +228,13 @@ function calcMAP(modalityFrom, modalityTo, classesFrom, classesTo, usePrecompute
         saveDistAndSimToMatFile(D,S)
     end
 
-    return calcMAP_old(queryCodes, dbCodes, queryLabels, dbLabels)
+    local map = calcMAP_old(queryCodes, dbCodes, queryLabels, dbLabels)
+    -- D, S = getDistanceAndSimilarityForMAP(queryCodes, dbCodes, queryLabels, dbLabels)
+    -- local map = compute_map(dbCodes, queryCodes, S)
+
+    timer:stop()
+    local compute_time = timer:time().real
+    return map, compute_time
 end
 
 function compute_map(test_data, train_data, similarities)
@@ -299,11 +311,11 @@ function getHashCodeBitCounts(trainset)
         end
     end
 
-    hbc = {}
+    hbc = {} -- TODO: Make local? Nice to have globally to look at though
     hbc[I] = ibc
     hbc[X] = tbc
-    stdev_image = ibc:double():std()
-    stdev_text = tbc:double():std()
+    local stdev_image = ibc:double():std()
+    local stdev_text = tbc:double():std()
     return hbc, stdev_image, stdev_text
 end
 
@@ -332,14 +344,14 @@ end
 
 function calcAndPrintHammingAccuracy(trainBatch, similarity_target, statsFile)
 
-    imHash = getHashCodes(trainBatch.data[I])
-    teHash = getHashCodes(trainBatch.data[X])
+    local imHash = getHashCodes(trainBatch.data[I])
+    local teHash = getHashCodes(trainBatch.data[X])
 
-    s = similarity_target:size(1)
+    local s = similarity_target:size(1)
 
     for i = 4,8 do
-        similarity = torch.eq(imHash, teHash):sum(2):ge(i)
-        numCorrect = torch.eq(similarity, similarity_target):sum()
+        local similarity = torch.eq(imHash, teHash):sum(2):ge(i)
+        local numCorrect = torch.eq(similarity, similarity_target):sum()
         statsPrint(string.format("Accuracy%d = %.2f", i, numCorrect*100 / s), statsFile)
     end
 end

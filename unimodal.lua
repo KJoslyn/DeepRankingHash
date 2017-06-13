@@ -10,6 +10,18 @@
 -- trainAndEvaluate(numEpochs, batchSize)
 -- /////////////////////////////////////////
 
+function runEverything()
+
+    local datasetType = 'nus'
+    local modality = 'I'
+
+    loadParamsAndPackages(datasetType, modality)
+    resetGlobals()
+    loadVariableTrainingParams()
+    loadModelAndOptimState()
+    loadData()
+end
+
 function doSetLRForLayer(layerIdx, newLRMult)
     m.classifier:get(layerIdx):learningRate('weight', newLRMult)
     m.classifier:get(layerIdx):learningRate('bias', newLRMult)
@@ -20,7 +32,7 @@ function doSetWDForLayer(layerIdx, newWDMult)
     m.classifier:get(layerIdx):weightDecay('bias', newWDMult)
 end
 
-local function doChangeLRAndWDForLayer(layerName, newLR, newWD)
+function doChangeLRAndWDForLayer(layerName, newLR, newWD)
 
     local newLRMult = newLR / p.baseLearningRate
     local newWDMult
@@ -174,6 +186,8 @@ function loadModelAndOptimState()
     else
        print('Error in unimodal.lua: Unrecognized modality')
     end
+
+    m.classifier = m.classifier:cuda()
 
     o.optimState = {
         learningRate = p.baseLearningRate,
