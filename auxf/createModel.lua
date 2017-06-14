@@ -134,9 +134,9 @@ function getFineTunedImageModel()
 
     local snapshotFile 
     if p.datasetType == 'mir' then
-        snapshotFile = 'id1.t7'
+        snapshotFile = '6_13_snapshot_epoch_26.t7' -- 89.5% val, 99+% train accuracy
     elseif p.datasetType == 'nus' then
-        snapshotFile = 'snapshot_epoch22.t7'
+        snapshotFile = '6_14_snapshot_epoch20.t7' -- 85.3% val, 98.9% train accuracy
     end
     loadModelSnapshot(model, 'imageNet', snapshotFile)
 
@@ -514,13 +514,6 @@ function getCriterion(simWeight, balanceWeight, quantWeight)
 end
 
 function loadModelSnapshot(model, snapshot2ndLevelDir, snapshotFileName)
-
-  -- If these aren't specified, use hardcoded values
-  if not snapshot2ndLevelDir and snapshotFileName then
-    -- local snapshot2ndLevelDir = 'Lr5e4_5kquery_5kdatabase'
-    local snapshot2ndLevelDir = 'imageNet'
-    local snapshotFileName = 'snapshot_epoch_500.t7'
-  end
 
   local snapshotFullPath
   if not snapshot2ndLevelDir then

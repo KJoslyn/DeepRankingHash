@@ -10,12 +10,19 @@
 -- trainAndEvaluate(numEpochs, batchSize)
 -- /////////////////////////////////////////
 
+function reloadAuxfPackage(pname)
+  local pkg = 'auxf.' .. pname
+  package.loaded[pkg] = nil
+  require(pkg)
+end
+
 function runEverything()
 
     local datasetType = 'nus'
     local modality = 'I'
 
     loadParamsAndPackages(datasetType, modality)
+    p.saveAccThreshold = 85
     resetGlobals()
     loadVariableTrainingParams()
     loadModelAndOptimState()
@@ -298,6 +305,11 @@ function loadData(small)
 end
 
 function doOneEpoch()
+    doSGD()
+    return doEvals()
+end
+
+function doSGD()
 
     local params = o.params
     local gradParams = o.gradParams
@@ -316,7 +328,7 @@ function doOneEpoch()
     totalLoss = 0
     totNumIncorrect = 0
 
-    local numBatches = math.ceil(Ntrain / p.batchSize)
+    numBatches = math.ceil(Ntrain / p.batchSize)
 
     for batchNum = 0, numBatches - 1 do
 
@@ -357,6 +369,9 @@ function doOneEpoch()
     g.epochTimer:stop()
 
     g.numEpochsCompleted = g.numEpochsCompleted + 1
+end
+
+function doEvals()
 
     local epoch = g.numEpochsCompleted
 
@@ -398,26 +413,26 @@ function doOneEpoch()
         s.accIdx = 0
     end
 
-    local save
-    if p.modality == 'I' then
-        save = epoch % 10 == 0
-    else
-        -- save = epoch == 200 or epoch == 300 or epoch == 500 or epoch == 750 or epoch == 1000 or epoch == 1500 or epoch == 2000
-        save = false
-    end
+    -- local save
+    -- if p.modality == 'I' then
+    --     save = epoch % 10 == 0
+    -- else
+    --     -- save = epoch == 200 or epoch == 300 or epoch == 500 or epoch == 750 or epoch == 1000 or epoch == 1500 or epoch == 2000
+    --     save = false
+    -- end
 
-    if save then
-    -- if epoch == 300 or epoch == 500 or epoch == 750 or epoch == 900 or epoch == 1000 then
-        local snapshotFilename
-        if g.snapshotFilename then
-            snapshotFilename = g.snapshotFilename
-        else
-            local date = os.date("*t", os.time())
-            snapshotFilename = date.month .. "_" .. date.day .. "_" .. date.hour .. "_" .. date.min
-        end
-        snapshotFilename = snapshotFilename .. '_snapshot_epoch_' .. epoch
-        saveSnapshot(snapshotFilename, params, gradParams)
-    end
+    -- if save then
+    -- -- if epoch == 300 or epoch == 500 or epoch == 750 or epoch == 900 or epoch == 1000 then
+    --     local snapshotFilename
+    --     if g.snapshotFilename then
+    --         snapshotFilename = g.snapshotFilename
+    --     else
+    --         local date = os.date("*t", os.time())
+    --         snapshotFilename = date.month .. "_" .. date.day .. "_" .. date.hour .. "_" .. date.min
+    --     end
+    --     snapshotFilename = snapshotFilename .. '_snapshot_epoch_' .. epoch
+    --     saveSnapshot(snapshotFilename, params, gradParams)
+    -- end
 
     return avgLoss, valClassAcc
 end
@@ -443,8 +458,24 @@ function trainAndEvaluate(numEpochs, batchSize, lr, mom, wd)
     end
     -- /////////////////////////
 
+    local bestValAcc = 0
+    local bestValAccEpoch = 0
+
     for epoch = 1, numEpochs do
         local loss, valAcc = doOneEpoch()
+
+        if valAcc > bestValAcc then
+            bestValAcc = valAcc
+            bestValAccEpoch = epoch
+            if valAcc > p.saveAccThreshold then
+                if not g.snapshotFilename then
+                    local date = os.date("*t", os.time())
+                    g.snapshotFilename = date.month .. "_" .. date.day .. "_" .. date.hour .. "_" .. date.min
+                end
+                local name = g.snapshotFilename .. '_best'
+                saveSnapshot(name, o.params, o.gradParams)
+            end
+        end
     end
 end
 

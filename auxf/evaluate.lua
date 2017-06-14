@@ -43,12 +43,17 @@ end
 
 function calcRoundedClassifierOutput(data) 
 
+    local cData = torch.CudaTensor(data:size()):copy(data)
+    -- local z
     if data:size(2) == 3 then -- Image modality
         -- return m.imageClassifier:cuda():forward(data:cuda()):round()
-        return m.imageClassifier:forward(data:cuda()):round()
+        return m.imageClassifier:forward(cData):round()
     else -- Text modality
-        return m.textClassifier:forward(data:cuda()):round()
+        return m.textClassifier:forward(cData):round()
     end
+    -- cData = nil
+    -- collectgarbage()
+    -- return z
 end
 
 function calcRawPredictions(data)
@@ -76,7 +81,12 @@ function computeInBatches(computeFunction, output, data)
 
     if data:size(2) == 3 then -- Image modality
         local N = data:size(1)
-        local batchSize = 2000
+
+        -- Don't make the batch size too big. Forward propagation of a large batch eats up a lot of GPU space that we can't reclaim.
+        -- It might be related to the spatial convolution layers https://groups.google.com/forum/#!topic/torch7/krvJP5fqTgQ
+        -- Also related- env variable THC_CACHING_ALLOCATOR=0 allows collectgarbage() to work as expected
+        -- https://github.com/torch/torch7/issues/229
+        local batchSize = 128 
         local numBatches = torch.ceil(N / batchSize)
         for b = 0, numBatches - 1 do
             local startIndex = b * batchSize + 1
@@ -84,6 +94,7 @@ function computeInBatches(computeFunction, output, data)
             local batch = data[{{ startIndex, endIndex }}]
             -- output[{{ startIndex, endIndex}}] = computeFunction(batch)
             output[{{ startIndex, endIndex}}]:copy(computeFunction(batch))
+            collectgarbage()
         end
         return output    
     else -- Text modality
