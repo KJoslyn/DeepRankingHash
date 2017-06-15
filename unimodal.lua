@@ -4,11 +4,41 @@
 -- loadParamsAndPackages(datasetType, modality) -- 'mir' or 'nus', 'I', or 'X'
 -- resetGlobals()
 -- loadVariableTrainingParams(baseLearningRate, baseWeightDecay, baseLearningRateDecay, mom)
--- loadModelAndOptimState()
+-- loadModelAndOptimState() - set p.layerSizes if using custom text model
 -- loadData() -- uses dataLoader.lua
 -- optional: loadModelSnapshot -- from createModel.lua
 -- trainAndEvaluate(numEpochs, batchSize)
 -- /////////////////////////////////////////
+
+function reloadAuxfPackage(pname)
+  local pkg = 'auxf.' .. pname
+  package.loaded[pkg] = nil
+  require(pkg)
+end
+
+function runEverything()
+
+    local datasetType = 'nus'
+    local modality = 'X'
+
+    loadParamsAndPackages(datasetType, modality)
+    p.saveAccThreshold = 86
+    resetGlobals()
+    loadVariableTrainingParams()
+    loadModelAndOptimState()
+    loadData()
+end
+
+function tempTest()
+
+    local dst = 'nus'
+    local mod = 'X'
+    loadParamsAndPackages(dst, mod)
+    resetGlobals()
+    loadVariableTrainingParams()
+    loadModelAndOptimState()
+    d = torch.load('/home/kjoslyn/kevin/Project/temp/d.t7')
+end
 
 function doSetLRForLayer(layerIdx, newLRMult)
     m.classifier:get(layerIdx):learningRate('weight', newLRMult)
@@ -20,7 +50,7 @@ function doSetWDForLayer(layerIdx, newWDMult)
     m.classifier:get(layerIdx):weightDecay('bias', newWDMult)
 end
 
-local function doChangeLRAndWDForLayer(layerName, newLR, newWD)
+function doChangeLRAndWDForLayer(layerName, newLR, newWD)
 
     local newLRMult = newLR / p.baseLearningRate
     local newWDMult
@@ -88,7 +118,7 @@ function loadParamsAndPackages(datasetType, modality, plotNumEpochs)
     local snapshotDatasetDir
     if datasetType == 'mir' then
         p.numClasses = 24
-        p.tagDim = 1075
+        p.tagDim = 1075 -- Change tagDim if using PCA
         snapshotDatasetDir = '/mirflickr'
         g.datasetPath = '/home/kjoslyn/datasets/mirflickr/'
         g.evalTrainAccEpochs = 5
@@ -174,6 +204,8 @@ function loadModelAndOptimState()
     else
        print('Error in unimodal.lua: Unrecognized modality')
     end
+
+    m.classifier = m.classifier:cuda()
 
     o.optimState = {
         learningRate = p.baseLearningRate,
@@ -284,6 +316,11 @@ function loadData(small)
 end
 
 function doOneEpoch()
+    doSGD()
+    return doEvals()
+end
+
+function doSGD()
 
     local params = o.params
     local gradParams = o.gradParams
@@ -302,7 +339,7 @@ function doOneEpoch()
     totalLoss = 0
     totNumIncorrect = 0
 
-    local numBatches = math.ceil(Ntrain / p.batchSize)
+    numBatches = math.ceil(Ntrain / p.batchSize)
 
     for batchNum = 0, numBatches - 1 do
 
@@ -343,6 +380,9 @@ function doOneEpoch()
     g.epochTimer:stop()
 
     g.numEpochsCompleted = g.numEpochsCompleted + 1
+end
+
+function doEvals()
 
     local epoch = g.numEpochsCompleted
 
@@ -384,31 +424,33 @@ function doOneEpoch()
         s.accIdx = 0
     end
 
-    local save
-    if p.modality == 'I' then
-        save = epoch % 10 == 0
-    else
-        -- save = epoch == 200 or epoch == 300 or epoch == 500 or epoch == 750 or epoch == 1000 or epoch == 1500 or epoch == 2000
-        save = false
-    end
+    -- local save
+    -- if p.modality == 'I' then
+    --     save = epoch % 10 == 0
+    -- else
+    --     -- save = epoch == 200 or epoch == 300 or epoch == 500 or epoch == 750 or epoch == 1000 or epoch == 1500 or epoch == 2000
+    --     save = false
+    -- end
 
-    if save then
-    -- if epoch == 300 or epoch == 500 or epoch == 750 or epoch == 900 or epoch == 1000 then
-        local snapshotFilename
-        if g.snapshotFilename then
-            snapshotFilename = g.snapshotFilename
-        else
-            local date = os.date("*t", os.time())
-            snapshotFilename = date.month .. "_" .. date.day .. "_" .. date.hour .. "_" .. date.min
-        end
-        snapshotFilename = snapshotFilename .. '_snapshot_epoch_' .. epoch
-        saveSnapshot(snapshotFilename, params, gradParams)
-    end
+    -- if save then
+    -- -- if epoch == 300 or epoch == 500 or epoch == 750 or epoch == 900 or epoch == 1000 then
+    --     local snapshotFilename
+    --     if g.snapshotFilename then
+    --         snapshotFilename = g.snapshotFilename
+    --     else
+    --         local date = os.date("*t", os.time())
+    --         snapshotFilename = date.month .. "_" .. date.day .. "_" .. date.hour .. "_" .. date.min
+    --     end
+    --     snapshotFilename = snapshotFilename .. '_snapshot_epoch_' .. epoch
+    --     saveSnapshot(snapshotFilename, params, gradParams)
+    -- end
 
     return avgLoss, valClassAcc
 end
 
 function trainAndEvaluate(numEpochs, batchSize, lr, mom, wd)
+
+    assert(p.saveAccThreshold)
 
     -- ///////////////////////
     -- This section that uses the input parameters is not used in mainUni.lua since it sets the parameters
@@ -429,8 +471,24 @@ function trainAndEvaluate(numEpochs, batchSize, lr, mom, wd)
     end
     -- /////////////////////////
 
+    local bestValAcc = 0
+    local bestValAccEpoch = 0
+
     for epoch = 1, numEpochs do
         local loss, valAcc = doOneEpoch()
+
+        if valAcc > bestValAcc then
+            bestValAcc = valAcc
+            bestValAccEpoch = epoch
+            if valAcc > p.saveAccThreshold then
+                if not g.snapshotFilename then
+                    local date = os.date("*t", os.time())
+                    g.snapshotFilename = date.month .. "_" .. date.day .. "_" .. date.hour .. "_" .. date.min
+                end
+                local name = g.snapshotFilename .. '_best'
+                saveSnapshot(name, o.params, o.gradParams)
+            end
+        end
     end
 end
 

@@ -1,15 +1,23 @@
 require 'fullNet'
 
-function runAllParamsets(datasetType, paramFactorialSet, numEpochs, evalInterval, consecutiveStop)
+function runAllParamsets(datasetType, paramFactorialSet, numEpochs, evalInterval, iterationsPerEpoch, usePretrainedImageFeatures, consecutiveStop)
 
     -- This is the main function to call
 
     -- TODO: This is set to a constant
-    local iterationsPerEpoch = 25
+    -- local iterationsPerEpoch = 25
 
-    loadParamsAndPackages(datasetType, iterationsPerEpoch)
+    loadParamsAndPackages(datasetType, iterationsPerEpoch, usePretrainedImageFeatures)
 
-    g.statsDir = '/home/kjoslyn/kevin/Project/autoStats'
+    local autoStatsDir
+    if datasetType == 'mir' then
+        autoStatsDir = 'mirflickr'
+    elseif datasetType == 'nus' then
+        autoStatsDir = 'nuswide'
+    end
+    autoStatsDir = autoStatsDir .. '/CM'
+
+    g.statsDir = '/home/kjoslyn/kevin/Project/autoStats/' .. autoStatsDir
     g.meta = io.open(g.statsDir .. "/metaStats.txt", 'a')
     g.startStatsId = nil
 
@@ -40,6 +48,10 @@ function recursiveRunAllParamsets(pfs_part, pfs_full, paramCount, numParams)
     if paramCount == numParams then
         -- printParams(pfs_full)
         if validateParams() then
+            -- If this starts a new parameter combination, increment the paramIdx (initialized to 0)
+            if p.numKFoldSplits == 1 or p.kFoldNum == 1 then
+                g.resultsParamIdx = g.resultsParamIdx + 1
+            end
             runWithParams(pfs_full)
         end
     else
@@ -47,11 +59,6 @@ function recursiveRunAllParamsets(pfs_part, pfs_full, paramCount, numParams)
         local paramName = thisParamset[1]
         local valueSet = thisParamset[2]
         for _, value in pairs(valueSet) do
-
-            -- If this starts a new parameter combination, increment the paramIdx (initialized to 0)
-            if p.numKFoldSplits == 1 or paramName == 'kfn' and value == 1 then
-                g.resultsParamIdx = g.resultsParamIdx + 1
-            end
 
             local oldValue = setParamValue(paramName, value)
             recursiveRunAllParamsets( { unpack(pfs_part, 2, #pfs_part) }, pfs_full, paramCount + 1, numParams)
@@ -63,6 +70,8 @@ end
 function validateParams()
 
     if p.quantRegWeight > 0 and p.balanceRegWeight == 0 then
+        return false
+    elseif p.L * math.log(p.k) / math.log(2) ~= 60 then
         return false
     else
         return true
@@ -117,6 +126,23 @@ function getLongParamName(short)
         return 'quantRegWeight'
     elseif short == 'lrd' then
         return 'baseLearningRateDecay'
+    elseif short == 'lrd' then
+        return 'baseLearningRateDecay'
+    elseif short == 'L' then
+        return 'L'
+    elseif short == 'k' then
+        return 'k'
+    -- TODO, or not
+    -- elseif short == 'IClr' then
+    --     return 'IClrMult'
+    elseif short == 'XClr' then
+        return 'XClrMult'
+    elseif short == 'IHlr' then
+        return 'IHlrMult'
+    elseif short == 'XHlr' then
+        return 'XHlrMult'
+    elseif short == 'ls' then
+        return 'layerSizes'
     elseif short == 'kfn' then
         return 'kFoldNum'
     end
@@ -154,8 +180,17 @@ function prepare()
     -- TODO: These are set to constants right now
     local simWeight = 1
 
+    if p.lrMultForHashLayer and not p.XHlrMult then
+        p.XHlrMult = p.lrMultForHashLayer
+        p.IHlrMult = p.lrMultForHashLayer
+    end
+
+    local XClrMult = p.XClrMult or 1
+    local IClrMult = p.IClrMult or 1
+
     clearState()
-    loadFullModel(p.modelType, p.lrMultForHashLayer)
+    resetGlobals()
+    loadFullModel(p.modelType, p.XHlrMult, p.IHlrMult, XClrMult, IClrMult, false, p.layerSizes)
     if d.trainset == nil then
         loadData()
     end
@@ -206,8 +241,14 @@ function printParams(paramFactorialSet, log1, log2)
         local paramVal = p[longParamName]
         if type(paramVal) == 'string' then
             str = string.format("%s = %s", shortParamName, paramVal)
+        elseif type(paramVal) == 'table' then
+            str = '{ '
+            for j = 1, #paramVal do
+                str = str .. paramVal[j] .. ' '
+            end
+            str = str .. '}'
         else
-            str = string.format("%s = %.4f", shortParamName, paramVal)
+            str = string.format("%s = %.5f", shortParamName, paramVal)
         end
         statsPrint(str, log1, log2)
         if shortParamName ~= 'kfn' then
@@ -236,18 +277,34 @@ function trainAndEvaluateAutomatic(modality, numEpochs, evalInterval, paramFacto
   local dateStr = date.month .. "_" .. date.day .. "_" .. date.hour .. "_" .. date.min
 
   local statsFileName = getStatsFileName()
+  g.plotFilename = g.statsDir .. '/plots/' .. statsFileName .. '_CMplot.pdf'
   g.sf = io.open(g.statsDir .. '/' .. statsFileName, 'w')
   g.meta:write(statsFileName .. '\n')
   print("Training with new parameters...")
   statsPrint(dateStr, g.meta, g.sf)
   local paramStr = printParams(paramFactorialSet, g.meta, g.sf)
   g.paramSettingsLegend[tostring(getLegendSize() + 1)] = paramStr
+  g.snapshotFilename = statsFileName
 
   local count = 0
-  local epoch = 1
+  local epoch = 0
   local bestEpochLoss = 1e10 -- a large number
   local bestCmEpochLoss = 1e10 -- best cross-modal epoch loss
+--   local bestIXv = 0
+--   local bestIXvEpoch = 0
+  local bestAvgV = 0
+  local bestAvgVEpoch = 0
   while epoch <= numEpochs and count < p.consecutiveStop do
+
+    epoch = epoch + 1
+
+    if epoch == 11 then
+        changeLearningRateForHashLayer(1e4)
+    elseif epoch == 51 then
+        changeLearningRateForHashLayer(5e3)
+    elseif epoch == 701 then
+        changeLearningRateForHashLayer(1e3)
+    end
 
     local epochLoss, cmEpochLoss = doOneEpochOnModality(modality, false)
     if cmEpochLoss < bestCmEpochLoss then
@@ -255,21 +312,44 @@ function trainAndEvaluateAutomatic(modality, numEpochs, evalInterval, paramFacto
     end
     if epochLoss < bestEpochLoss then
         bestEpochLoss = epochLoss
-        count = 0
-    else
-        count = count + 1
+        -- count = 0
+    -- else
+        -- count = count + 1
     end
 
     if epoch % evalInterval == 0 then
-      doRunEvals(g.resultsParamIdx, resultsEvalIdx)
+      local IXt, XIt, IXv, XIv = doRunEvals(g.resultsParamIdx, resultsEvalIdx)
       resultsEvalIdx = resultsEvalIdx + 1
+      local avgV = (IXv + XIv) / 2
+      if avgV > bestAvgV then
+    --   if IXv > bestIXv then
+        count = 0
+        bestAvgV = avgV
+        bestAvgVEpoch = epoch
+        -- bestIXv = IXv
+        -- bestIXvEpoch = epoch
+        -- if IXv > 85 then
+          local name = g.snapshotFilename .. '_best'
+          saveSnapshot(name, o.params_full, o.gradParams_full)
+        -- end
+      else
+        count = count + 1
+      end
+      
+      addPlotStats(epoch, evalInterval, IXt, XIt, IXv, XIv)
     end
-    epoch = epoch + 1
+
+    -- plotCrossModalLoss(epoch) -- TODO: This sometimes causes the program to crash. Plotting at end instead.
   end
 
   statsPrint('****Stopped at epoch ' .. epoch, g.meta, g.sf)
   statsPrint(string.format('Best epoch (avg) loss = %.2f', bestEpochLoss), g.meta, g.sf)
-  statsPrint(string.format('Best cross-modal epoch (avg) loss = %.2f\n\n', bestCmEpochLoss), g.meta, g.sf)
+  statsPrint(string.format('Best cross-modal epoch (avg) loss = %.2f', bestCmEpochLoss), g.meta, g.sf)
+--   statsPrint(string.format('Best IXv = %.4f @ epoch %d\n\n', bestIXv, bestIXvEpoch), g.meta, g.sf)
+  statsPrint(string.format('Best avgV = %.4f @ epoch %d\n\n', bestAvgV, bestAvgVEpoch), g.meta, g.sf)
+
+  plotCrossModalLoss(epoch)
+  gnuplot.closeall()
 
   io.close(g.sf)
 end
@@ -282,4 +362,5 @@ function doRunEvals(paramIdx, evalIdx)
     g.trainResultsMatrix[paramIdx][evalIdx] = g.trainResultsMatrix[paramIdx][evalIdx] + (XIt / den)
     g.valResultsMatrix[paramIdx][evalIdx] = g.valResultsMatrix[paramIdx][evalIdx] + (IXv / den)
     g.valResultsMatrix[paramIdx][evalIdx] = g.valResultsMatrix[paramIdx][evalIdx] + (XIv / den)
+    return IXt, XIt, IXv, XIv
 end

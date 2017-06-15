@@ -7,14 +7,16 @@ function getHashLayerFullyConnected(prevLayerSize, hashLayerSize, lrMultForHashL
     if addHiddenLayer then
         model:add(nn.Linear(prevLayerSize, prevLayerSize)
                  :init('weight', nninit.xavier, {dist = 'normal'})
-                 :learningRate('weight', lrMultForHashLayer))
+                 :learningRate('weight', lrMultForHashLayer)
+                 :learningRate('bias', lrMultForHashLayer))
         -- model:add(cudnn.ReLU(true))
         -- model:add(nn.Dropout(0.500000))
     end
 
     model:add(nn.Linear(prevLayerSize, hashLayerSize)
         :init('weight', nninit.xavier, {dist = 'normal'})
-        :learningRate('weight', lrMultForHashLayer))
+        :learningRate('weight', lrMultForHashLayer)
+        :learningRate('bias', lrMultForHashLayer))
 
     model:add(nn.Reshape(p.L, p.k))
     model:add(nn.SplitTable(2))
@@ -38,7 +40,8 @@ function getHashLayerGrouped(prevLayerSize, L, k, lrMultForHashLayer, addHiddenL
     if addHiddenLayer then
         hashLayer:add(nn.Linear(prevLayerSize, groupSize * L)
                  :init('weight', nninit.xavier, {dist = 'normal'})
-                 :learningRate('weight', lrMultForHashLayer))
+                 :learningRate('weight', lrMultForHashLayer)
+                 :learningRate('bias', lrMultForHashLayer))
     end
 
     hashLayer:add(nn.Reshape(L, groupSize))
@@ -47,7 +50,8 @@ function getHashLayerGrouped(prevLayerSize, L, k, lrMultForHashLayer, addHiddenL
     map1 = nn.MapTable()
     map1:add(nn.Linear(groupSize, k)
         :init('weight', nninit.xavier, {dist = 'normal'})
-        :learningRate('weight', lrMultForHashLayer))
+        :learningRate('weight', lrMultForHashLayer)
+        :learningRate('bias', lrMultForHashLayer))
 
     map2 = nn.MapTable()
     map2:add(nn.SoftMax())
@@ -60,8 +64,10 @@ function getHashLayerGrouped(prevLayerSize, L, k, lrMultForHashLayer, addHiddenL
     return hashLayer
 end
 
-function getImageModelImageNetPretrained(lrMultForLastLayer)
+function getImageModelImageNetPretrained(lrMultForLastLayer, lrMultForClassLayer)
     -- Uses pre-trained model from https://github.com/BVLC/caffe/tree/master/models/bvlc_alexnet
+
+    -- TODO: lrMultForClassLayer is not implemented yet! Maybe don't need to implement it.
 
     local model = nn.Sequential()
 
@@ -71,7 +77,8 @@ function getImageModelImageNetPretrained(lrMultForLastLayer)
     model.modules[23] = nil
     model:add(nn.Linear(4096, p.numClasses)
             :init('weight', nninit.xavier, {dist = 'normal', gain = 'sigmoid'})
-            :learningRate('weight', lrMultForLastLayer))
+            :learningRate('weight', lrMultForLastLayer)
+            :learningRate('bias', lrMultForLastLayer))
 
     model:add(nn.Sigmoid())
 
@@ -116,13 +123,20 @@ end
 
 function getImageModelForFullNet(L, k, type, lrMultForHashLayer)
 
+    local model = getFineTunedImageModel()
+    model.modules[#model.modules] = nil -- This is messy, but need to remove sigmoid layer for now. Will add it back later.
+    return createClassifierAndHasher(model, 4096, L, k, type, lrMultForHashLayer)
+end
+
+function getFineTunedImageModel()
+
     local model = getImageModel()
 
     local snapshotFile 
     if p.datasetType == 'mir' then
-        snapshotFile = 'id1.t7'
+        snapshotFile = '6_13_snapshot_epoch_26.t7' -- 89.5% val, 99+% train accuracy
     elseif p.datasetType == 'nus' then
-        snapshotFile = 'snapshot_epoch22.t7'
+        snapshotFile = '6_14_snapshot_epoch20.t7' -- 85.3% val, 98.9% train accuracy
     end
     loadModelSnapshot(model, 'imageNet', snapshotFile)
 
@@ -130,8 +144,7 @@ function getImageModelForFullNet(L, k, type, lrMultForHashLayer)
     -- local snapshotFile = 'snapshot_epoch_500.t7'
     -- loadModelSnapshot(model, snapshot2ndLevelDir, snapshotFile)
 
-    model.modules[#model.modules] = nil -- This is messy, but need to remove sigmoid layer for now. Will add it back later.
-    return createClassifierAndHasher(model, 4096, L, k, type, lrMultForHashLayer)
+    return model
 end
 
 function table.shallow_copy(t)
@@ -142,7 +155,9 @@ function table.shallow_copy(t)
   return t2
 end
 
-function buildCustomTextModel(layerSizes)
+function buildCustomTextModel(layerSizes, lrMultForClassLayer)
+
+    local lrMult = lrMultForClassLayer or 1
 
     local model = nn.Sequential()
 
@@ -186,7 +201,10 @@ function buildCustomTextModel(layerSizes)
         end
 
         -- model:add(nn.Linear(from, to):init('weight', nninit.xavier, {dist = 'normal', gain = 'relu'}))
-        model:add(nn.Linear(from, to):init('weight', weightInit, {dist = 'normal', gain = 'relu'}))
+        model:add(nn.Linear(from, to)
+             :init('weight', weightInit, {dist = 'normal', gain = 'relu'})
+             :learningRate('weight', lrMult)
+             :learningRate('bias', lrMult))
 
         lprev = to
     end
@@ -198,17 +216,32 @@ function buildCustomTextModel(layerSizes)
     return model
 end
 
-function doGetBasicTextModel()
+function doGetBasicTextModel(lrMultForClassLayer)
+
+    local lrMult = lrMultForClassLayer or 1
 
     local model = nn.Sequential()
     -- model.add(nn.View(-1):setNumInputDims(3))
-    model:add(nn.Linear(p.tagDim, p.tagDim):init('weight', nninit.xavier, {dist = 'normal', gain = 'relu'}))
+    model:add(nn.Linear(p.tagDim, p.tagDim)
+         :init('weight', nninit.xavier, {dist = 'normal', gain = 'relu'})
+         :learningRate('weight', lrMult)
+         :learningRate('bias', lrMult))
+
     model:add(cudnn.ReLU(true))
     model:add(nn.Dropout(0.500000))
-    model:add(nn.Linear(p.tagDim, 2048):init('weight', nninit.xavier, {dist = 'normal', gain = 'relu'}))
+
+    model:add(nn.Linear(p.tagDim, 2048)
+         :init('weight', nninit.xavier, {dist = 'normal', gain = 'relu'})
+         :learningRate('weight', lrMult)
+         :learningRate('bias', lrMult))
+
     model:add(cudnn.ReLU(true))
     model:add(nn.Dropout(0.500000))
-    model:add(nn.Linear(2048, p.numClasses):init('weight', nninit.xavier, {dist = 'normal', gain = 'sigmoid'}))
+
+    model:add(nn.Linear(2048, p.numClasses)
+         :init('weight', nninit.xavier, {dist = 'normal', gain = 'sigmoid'})
+         :learningRate('weight', lrMult)
+         :learningRate('bias', lrMult))
 
     model:add(nn.Sigmoid())
     
@@ -217,12 +250,12 @@ function doGetBasicTextModel()
     return model
 end
 
-function getUntrainedTextModel(layerSizes)
+function getUntrainedTextModel(layerSizes, lrMultForClassLayer)
 
     if not layerSizes then
-        return doGetBasicTextModel()
+        return doGetBasicTextModel(lrMultForClassLayer)
     else
-        return buildCustomTextModel(layerSizes)
+        return buildCustomTextModel(layerSizes, lrMultForClassLayer)
     end
 end
 
@@ -242,17 +275,41 @@ function getMirflickrCaffeTrainedTextModel()
     return model
 end
 
-function getTextModelForFullNet(L, k, type, lrMultForHashLayer)
+local function checkTableEquivalence(tb1, tb2)
+    if #tb1 ~= #tb2 then
+        return false
+    end
+    for i = 1,#tb1 do
+        if tb1[i] ~= tb2[i] then
+            return false
+        end
+    end
+    return true
+end
 
-    local model = getUntrainedTextModel()
+function getTextModelForFullNet(L, k, type, lrMultForHashLayer, lrMultForClassLayer, layerSizes)
+
+    local model = getUntrainedTextModel(layerSizes, lrMultForClassLayer)
     local snapshotFile 
     if p.datasetType == 'mir' then
         -- snapshotFile = '2hl_epoch250.t7'
         -- snapshotFile = 'sn1700.t7'
-        snapshotFile = 'epoch330.t7'
+        -- If layerSizes parameter is not given, we will assume the standard case
+        if not layerSizes or checkTableEquivalence(layerSizes, { 't', 2048 }) then
+            snapshotFile = 'epoch330.t7'
+        elseif checkTableEquivalence(layerSizes, { 2048, 2048, 2048 }) then
+            snapshotFile = 'stats57.txt_best.t7' -- 88.4% val accuracy @ epoch 1132, 93.5% train acc
+        else
+            print('Error in getTextModelForFullNet: Unrecognized model architecture')
+        end
     elseif p.datasetType == 'nus' then
-        -- snapshotFile = '2hl_epoch100.t7'
-        snapshotFile = '1hl_epoch100.t7'
+        if not layerSizes or checkTableEquivalence(layerSizes, { 't', 2048 }) then
+            snapshotFile = '1hl_epoch100.t7'
+        elseif checkTableEquivalence(layerSizes, { 2048, 2048, 2048 }) then
+            snapshotFile = 'stats2.txt_best.t7' -- 88.76% val accuracy @ epoch 402, 92% train acc
+        else
+            print('Error in getTextModelForFullNet: Unrecognized model architecture')
+        end
     end
     loadModelSnapshot(model, 'textNet', snapshotFile)
 
@@ -270,13 +327,7 @@ function getTextModelForFullNet(L, k, type, lrMultForHashLayer)
     return createClassifierAndHasher(model, 2048, L, k, type, lrMultForHashLayer)
 end
 
-function createClassifierAndHasher(model, prevLayerSize, L, k, type, lrMultForHashLayer)
-
-    -- Grab classification layer and remove it
-    local classLayer = nn.Sequential()
-    classLayer:add(model.modules[#model.modules])
-    classLayer:add(nn.Sigmoid())
-    model.modules[#model.modules] = nil
+function getHashLayer(prevLayerSize, type, L, k, lrMultForHashLayer)
 
     local hashLayer
     if type == 'hfc' then
@@ -290,6 +341,19 @@ function createClassifierAndHasher(model, prevLayerSize, L, k, type, lrMultForHa
     else
         print('ERROR: Unrecognized hash layer type')
     end
+
+    return hashLayer
+end
+
+function createClassifierAndHasher(model, prevLayerSize, L, k, type, lrMultForHashLayer)
+
+    -- Grab classification layer and remove it
+    local classLayer = nn.Sequential()
+    classLayer:add(model.modules[#model.modules])
+    classLayer:add(nn.Sigmoid())
+    model.modules[#model.modules] = nil
+
+    local hashLayer = getHashLayer(prevLayerSize, type, L, k, lrMultForHashLayer)
 
     local concat = nn.ConcatTable()
     concat:add(classLayer)
@@ -456,13 +520,6 @@ end
 
 function loadModelSnapshot(model, snapshot2ndLevelDir, snapshotFileName)
 
-  -- If these aren't specified, use hardcoded values
-  if not snapshot2ndLevelDir and snapshotFileName then
-    -- local snapshot2ndLevelDir = 'Lr5e4_5kquery_5kdatabase'
-    local snapshot2ndLevelDir = 'imageNet'
-    local snapshotFileName = 'snapshot_epoch_500.t7'
-  end
-
   local snapshotFullPath
   if not snapshot2ndLevelDir then
     print('****Loading snapshot: ' .. snapshotFileName)
@@ -487,4 +544,3 @@ function loadModelSnapshot(model, snapshot2ndLevelDir, snapshotFileName)
   end
 
 end
-

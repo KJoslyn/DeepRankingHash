@@ -102,6 +102,12 @@ function dataset:__init(...)
 
    local tags = matio.load(self.path .. '/tags.mat')
    self.tags = tags.tags
+--    local tags = matio.load('/home/kjoslyn/datasets/mirflickr/tagsPCA_norm.mat')
+--    self.tags = tags.tagsPCA_norm
+--    local tags = matio.load('/home/kjoslyn/datasets/mirflickr/tagsPCA_unnorm.mat')
+--    self.tags = tags.tagsPCA_unnorm
+--    local tags = matio.load('/home/kjoslyn/datasets/mirflickr/tagsPCA_norm1000.mat')
+--    self.tags = tags.tagsPCA_norm1000
 
 --    local avgStd = matio.load(path .. '/avgStdevTrainSet.mat')
    local avgStd = torch.load(self.path .. '/avgStdevTrainSet.t7')
@@ -282,7 +288,8 @@ local function prepareForDoGet(self, modality, classes, i1, i2)
    if modality == 'I' then
       data = torch.FloatTensor(quantity, self.sampleSize[1], self.sampleSize[2], self.sampleSize[3])
    else
-      data = torch.FloatTensor(quantity, self.tags:size(2))
+    --   data = torch.FloatTensor(quantity, self.tags:size(2))
+      data = torch.Tensor(quantity, self.tags:size(2))
    end
    local labels = torch.FloatTensor(quantity, self.labels:size(2))
    local imgPathIndices
@@ -491,6 +498,13 @@ end
 function dataset:getBySplit(classArg, modality, i1, i2, permutation)
     -- 'Class' means the same thing as 'split' in this sense.
     -- classArg can be a string or a table of strings, belonging to 'training', 'query', 'val', or 'pretraining'.
+
+   if modality == 'B' then -- return images and tags
+      local im, tags, labels
+      im, labels = self:getBySplit(classArg, 'I', i1, i2, permutation)
+      tags = self:getBySplit(classArg, 'X', i1, i2, permutation)
+      return im, tags, labels
+   end
 
    local classes
    if type(classArg) == 'string' then

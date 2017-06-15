@@ -79,18 +79,20 @@ function calcMAP_old(queryCodes, databaseCodes, queryLabels, databaseLabels, ver
 
     K = 50
 
-    incorrectCounts = torch.Tensor(queryLabels:size(2)):fill(0)
+    -- qc = queryCodes
+    -- dc = databaseCodes
+
+    -- incorrectCounts = torch.Tensor(queryLabels:size(2)):fill(0)
 
     -- Q = 1
     Q = queryCodes:size(1)
     sumAPs = 0
     for q = 1,Q do
-        -- databaseCodes = torch.reshape(databaseCodes, 4000, p.L)
-        if fromModality == X then
-            query = torch.repeatTensor(queryCodes[q], databaseCodes:size(1), 1, 1)
-        else
-            query = torch.repeatTensor(queryCodes[q], databaseCodes:size(1), 1)
-        end
+
+        collectgarbage()
+
+        local query = queryCodes[q]:reshape(p.L, 1)
+        query = torch.expand(query, p.L, databaseCodes:size(1)):t()
 
         ne = torch.ne(query, databaseCodes):sum(2)
         ne = torch.reshape(ne, ne:size(1))

@@ -251,7 +251,7 @@ function trainAndEvaluateAutomatic(paramFactorialSet)
   local paramStr = printParams(paramFactorialSet, g.meta, g.sf)
   g.paramSettingsLegend[tostring(getLegendSize() + 1)] = paramStr
 
-  g.plotFilename = statsFileName .. '_plot.pdf'
+  g.plotFilename = g.statsDir .. '/plots/' .. statsFileName .. '_plot.pdf'
   g.snapshotFilename = statsFileName
 
   local count = 0
