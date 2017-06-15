@@ -62,7 +62,7 @@ function getImageFeaturesForLinearMethods(datasetType, useage)
         data.Xdb = dbTags
         data.Xtrain = trTags
         data.Xtest = teTags
-        data.Ydb = dbFeats
+        data.Ydb = dbFeats -- contains train, val and pretrain
         data.Ytrain = trFeats
         data.Ytest = teFeats
         data.L_db = dbLabels

@@ -10,8 +10,6 @@ end
 
 function getHashCodes(data)
 
-    -- collectgarbage()    
-    -- return computeInBatches(calcHashCodes, torch.LongTensor(data:size(1), p.L), data, nil)
     return computeInBatches(calcHashCodes, torch.CudaLongTensor(data:size(1), p.L), data, nil)
 end
 
@@ -67,7 +65,6 @@ end
 
 function calcHashCodes(data)
 
-    collectgarbage()
     local pred = calcRawPredictions(data)
 
     local reshapedInput = nn.Reshape(p.L,p.k):cuda():forward(pred)
@@ -79,27 +76,23 @@ end
 
 function computeInBatches(computeFunction, output, data) 
 
-    if data:size(2) == 3 then -- Image modality
-        local N = data:size(1)
+    local N = data:size(1)
 
-        -- Don't make the batch size too big. Forward propagation of a large batch eats up a lot of GPU space that we can't reclaim.
-        -- It might be related to the spatial convolution layers https://groups.google.com/forum/#!topic/torch7/krvJP5fqTgQ
-        -- Also related- env variable THC_CACHING_ALLOCATOR=0 allows collectgarbage() to work as expected
-        -- https://github.com/torch/torch7/issues/229
-        local batchSize = 128 
-        local numBatches = torch.ceil(N / batchSize)
-        for b = 0, numBatches - 1 do
-            local startIndex = b * batchSize + 1
-            local endIndex = math.min((b + 1) * batchSize, N)
-            local batch = data[{{ startIndex, endIndex }}]
-            -- output[{{ startIndex, endIndex}}] = computeFunction(batch)
-            output[{{ startIndex, endIndex}}]:copy(computeFunction(batch))
-            collectgarbage()
-        end
-        return output    
-    else -- Text modality
-        return computeFunction(data)
+    -- Don't make the batch size too big. Forward propagation of a large batch eats up a lot of GPU space that we can't reclaim.
+    -- It might be related to the spatial convolution layers https://groups.google.com/forum/#!topic/torch7/krvJP5fqTgQ
+    -- Also related- env variable THC_CACHING_ALLOCATOR=0 allows collectgarbage() to work as expected
+    -- https://github.com/torch/torch7/issues/229
+    local batchSize = 128 
+    local numBatches = torch.ceil(N / batchSize)
+    for b = 0, numBatches - 1 do
+        local startIndex = b * batchSize + 1
+        local endIndex = math.min((b + 1) * batchSize, N)
+        local batch = data[{{ startIndex, endIndex }}]
+        -- output[{{ startIndex, endIndex}}] = computeFunction(batch)
+        output[{{ startIndex, endIndex}}]:copy(computeFunction(batch))
+        collectgarbage()
     end
+    return output    
 end
 
 -- //////////////////////////////
@@ -124,6 +117,7 @@ function calcPretrainsetHashCodesForNuswide(modalityChar)
         local batchData, batchLabels = d.dataset:getBySplit('pretraining', modalityChar, startIndex, endIndex)
         codes[{ {startIndex, endIndex} }] = calcHashCodes(batchData):reshape(endIndex - startIndex + 1, p.L)
         labels[{ {startIndex, endIndex} }] = batchLabels
+        collectgarbage()
     end
 
     return codes, labels

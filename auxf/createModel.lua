@@ -298,13 +298,18 @@ function getTextModelForFullNet(L, k, type, lrMultForHashLayer, lrMultForClassLa
         if not layerSizes or checkTableEquivalence(layerSizes, { 't', 2048 }) then
             snapshotFile = 'epoch330.t7'
         elseif checkTableEquivalence(layerSizes, { 2048, 2048, 2048 }) then
-            snapshotFile = 'stats57.txt_best.t7'
+            snapshotFile = 'stats57.txt_best.t7' -- 88.4% val accuracy @ epoch 1132, 93.5% train acc
         else
             print('Error in getTextModelForFullNet: Unrecognized model architecture')
         end
     elseif p.datasetType == 'nus' then
-        -- snapshotFile = '2hl_epoch100.t7'
-        snapshotFile = '1hl_epoch100.t7'
+        if not layerSizes or checkTableEquivalence(layerSizes, { 't', 2048 }) then
+            snapshotFile = '1hl_epoch100.t7'
+        elseif checkTableEquivalence(layerSizes, { 2048, 2048, 2048 }) then
+            snapshotFile = 'stats2.txt_best.t7' -- 88.76% val accuracy @ epoch 402, 92% train acc
+        else
+            print('Error in getTextModelForFullNet: Unrecognized model architecture')
+        end
     end
     loadModelSnapshot(model, 'textNet', snapshotFile)
 
@@ -539,4 +544,3 @@ function loadModelSnapshot(model, snapshot2ndLevelDir, snapshotFileName)
   end
 
 end
-

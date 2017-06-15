@@ -19,14 +19,25 @@ end
 function runEverything()
 
     local datasetType = 'nus'
-    local modality = 'I'
+    local modality = 'X'
 
     loadParamsAndPackages(datasetType, modality)
-    p.saveAccThreshold = 85
+    p.saveAccThreshold = 86
     resetGlobals()
     loadVariableTrainingParams()
     loadModelAndOptimState()
     loadData()
+end
+
+function tempTest()
+
+    local dst = 'nus'
+    local mod = 'X'
+    loadParamsAndPackages(dst, mod)
+    resetGlobals()
+    loadVariableTrainingParams()
+    loadModelAndOptimState()
+    d = torch.load('/home/kjoslyn/kevin/Project/temp/d.t7')
 end
 
 function doSetLRForLayer(layerIdx, newLRMult)
@@ -438,6 +449,8 @@ function doEvals()
 end
 
 function trainAndEvaluate(numEpochs, batchSize, lr, mom, wd)
+
+    assert(p.saveAccThreshold)
 
     -- ///////////////////////
     -- This section that uses the input parameters is not used in mainUni.lua since it sets the parameters
