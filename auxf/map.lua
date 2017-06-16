@@ -84,17 +84,19 @@ function calcMAP_old(queryCodes, databaseCodes, queryLabels, databaseLabels, ver
 
     -- incorrectCounts = torch.Tensor(queryLabels:size(2)):fill(0)
 
+    local numDB = databaseCodes:size(1)
+
     -- Q = 1
     Q = queryCodes:size(1)
     sumAPs = 0
     for q = 1,Q do
 
-        collectgarbage()
+        -- collectgarbage()
 
         local query = queryCodes[q]:reshape(p.L, 1)
-        query = torch.expand(query, p.L, databaseCodes:size(1)):t()
+        query = torch.expand(query, p.L, numDB):t()
 
-        ne = torch.ne(query, databaseCodes):sum(2)
+        local ne = torch.ne(query, databaseCodes):sum(2)
         ne = torch.reshape(ne, ne:size(1))
         topkResults, ind = torch.Tensor(ne:size(1)):copy(ne):topk(K)
 
@@ -114,7 +116,7 @@ function calcMAP_old(queryCodes, databaseCodes, queryLabels, databaseLabels, ver
                 correct = correct + 1
                 AP = AP + (correct / k) -- add precision component
             else
-                incorrectCounts:add(kLabel:double())
+                -- incorrectCounts:add(kLabel:double())
             end
         end
         if correct > 0 then -- Correct should only be 0 if there are a small # of database objects and/or poorly trained

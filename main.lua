@@ -326,9 +326,10 @@ function trainAndEvaluateAutomatic(modality, numEpochs, evalInterval, paramFacto
       if IXv > bestIXv then
         bestIXv = IXv
         bestIXvEpoch = epoch
-        if IXv > 85 then
-            local name = g.snapshotFilename .. '_bestIXv'
-            saveSnapshot(name, o.params_full, o.gradParams_full)
+        if IXv > 0.85 then
+            local suffix = '_bestIXv'
+            saveSnapshot(g.snapshotFilename .. suffix, o.params_full, o.gradParams_full)
+            prepareTestMAPs(suffix)
         end
       end
       local avgV = (IXv + XIv) / 2
@@ -336,8 +337,9 @@ function trainAndEvaluateAutomatic(modality, numEpochs, evalInterval, paramFacto
         count = 0
         bestAvgV = avgV
         bestAvgVEpoch = epoch
-        local name = g.snapshotFilename .. '_bestAvg'
-        saveSnapshot(name, o.params_full, o.gradParams_full)
+        local suffix = '_bestAvg'
+        saveSnapshot(g.snapshotFilename .. suffix, o.params_full, o.gradParams_full)
+        prepareTestMAPs(suffix)
       else
         count = count + 1
       end
@@ -358,6 +360,23 @@ function trainAndEvaluateAutomatic(modality, numEpochs, evalInterval, paramFacto
   gnuplot.closeall()
 
   io.close(g.sf)
+end
+
+-- TODO: Make these test and not val
+function prepareTestMAPs(suffix)
+
+    local classesTo
+    -- if p.datasetType == 'mir' then
+        classesTo = {'training','val','pretraining'}
+    -- else
+    --     classesTo = {'training','val'}
+    -- end
+
+    local ixv_name = g.snapshotFilename .. '_DS_data_IX' .. suffix .. '.mat'
+    local IXv = calcMAP(I, X, 'val', classesTo, true, ixv_name)
+
+    local xiv_name = g.snapshotFilename .. '_DS_data_XI' .. suffix .. '.mat'
+    local XIv = calcMAP(X, I, 'val', classesTo, true, xiv_name)
 end
 
 function doRunEvals(paramIdx, evalIdx)

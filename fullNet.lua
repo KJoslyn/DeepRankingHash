@@ -634,19 +634,19 @@ function runEverything()
 
   -- These are the hardcoded variable params. Need to reload this file every time one changes.
 
-  local datasetType = 'nus'
+  local datasetType = 'mir'
   local iterationsPerEpoch = 50
-  local usePretrainedImageFeatures = true
-  local L = 8
+  local usePretrainedImageFeatures = false
+  local L = 16
   local k = 4
   local modelType = 'hgr'
   local lrMultForHashLayer = 5e4
-  -- local layerSizes = { 2048, 2048, 2048 }
-  local layerSizes = { 't', 2048 }
+  local layerSizes = { 2048, 2048, 2048 }
+  -- local layerSizes = { 't', 2048 }
   local modality = 'C'
   local simWeight = 1
-  local balanceWeight = .015
-  local quantWeight = 0
+  local balanceWeight = 0.015
+  local quantWeight = 0.25
 
   local XHlrMult = lrMultForHashLayer
   local IHlrMult = lrMultForHashLayer
@@ -654,6 +654,7 @@ function runEverything()
   local IClrMult = 1
 
   loadParamsAndPackages(datasetType, iterationsPerEpoch, usePretrainedImageFeatures, L, k)
+  -- p.baseMomentum = 0
   loadFullModel(modelType, XHlrMult, IHlrMult, XClrMult, IClrMult, false, layerSizes)
   loadData()
   -- loadTrainAndValSubsets(kNum)

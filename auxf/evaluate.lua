@@ -76,6 +76,9 @@ end
 
 function computeInBatches(computeFunction, output, data) 
 
+    -- local timer = torch.Timer()
+    -- local tt = torch.Timer()
+    -- tt:stop()
     local N = data:size(1)
 
     -- Don't make the batch size too big. Forward propagation of a large batch eats up a lot of GPU space that we can't reclaim.
@@ -90,8 +93,15 @@ function computeInBatches(computeFunction, output, data)
         local batch = data[{{ startIndex, endIndex }}]
         -- output[{{ startIndex, endIndex}}] = computeFunction(batch)
         output[{{ startIndex, endIndex}}]:copy(computeFunction(batch))
-        collectgarbage()
+        if b % 10 == 0 then
+            -- tt:resume()
+            collectgarbage()
+            -- tt:stop()
+        end
     end
+    -- timer:stop()
+    -- print(string.format("Time in compute in batches: %.2f", timer:time().real))
+    -- print(string.format("Time collecting garbage: %.2f", tt:time().real))
     return output    
 end
 
@@ -186,6 +196,13 @@ end
 
 function getDistanceAndSimilarityForMAP(queryCodes, databaseCodes, queryLabels, databaseLabels)
 
+    print("Calculating D and S matrices for matlab MAP")
+
+    local D_timer = torch.Timer()
+    D_timer:stop()
+    local S_timer = torch.Timer()
+    S_timer:stop()
+
     local queryLabels = queryLabels:cuda()
     local databaseLabels = databaseLabels:cuda()
 
@@ -196,29 +213,41 @@ function getDistanceAndSimilarityForMAP(queryCodes, databaseCodes, queryLabels, 
     local S = torch.CudaTensor(numQueries, numDB)
     local sumAPs = 0
     for q = 1,numQueries do
+        D_timer:resume()
         local queryCodeRep = torch.expand(queryCodes[q]:reshape(p.L,1), p.L, numDB):transpose(1,2)
         D[q] = torch.ne(queryCodeRep, databaseCodes):sum(2)
+        D_timer:stop()
 
+        S_timer:resume()
         local queryLabelRep = torch.expand(queryLabels[q]:reshape(p.numClasses,1), p.numClasses, numDB):transpose(1,2)
         S[q] = torch.cmul(queryLabelRep, databaseLabels):max(2)
+        S_timer:stop()
     end
+    print(string.format("D calc time: %.2f", D_timer:time().real))
+    print(string.format("S calc time: %.2f", S_timer:time().real))
 
     return D, S
 end
 
-function saveDistAndSimToMatFile(D,S)
+function saveDistAndSimToMatFile(D,S,DS_arg)
 
     local D_new = torch.LongTensor(D:size(1),D:size(2)):copy(D)
     local S_new = torch.LongTensor(S:size(1),S:size(2)):copy(S)
     if not matio then
         matio = require 'matio'
     end
-    local date = os.date("*t", os.time())
-    local dateStr = date.month .. "_" .. date.day .. "_" .. date.hour .. "_" .. date.min
-    matio.save(g.snapshotDir .. '/DS_data_' .. dateStr .. '.mat', {D=D_new,S=S_new})
+    local filename
+    if type(DS_arg) == 'boolean' then
+        local date = os.date("*t", os.time())
+        local dateStr = date.month .. "_" .. date.day .. "_" .. date.hour .. "_" .. date.min
+        filename = g.snapshotDir .. '/DS_data_' .. dateStr .. '.mat'
+    elseif type(DS_arg) == 'string' then
+        filename = DS_arg
+    end
+    matio.save(filename, {D=D_new,S=S_new})
 end
 
-function calcMAP(modalityFrom, modalityTo, classesFrom, classesTo, usePrecomputedCodes)
+function calcMAP(modalityFrom, modalityTo, classesFrom, classesTo, usePrecomputedCodes, DS_arg)
 
     local timer = torch.Timer()
     timer:resume()
@@ -228,9 +257,9 @@ function calcMAP(modalityFrom, modalityTo, classesFrom, classesTo, usePrecompute
     local queryCodes, queryLabels = getCodesAndLabels(modalityFrom, classesFrom, usePrecomputedCodes)
     local dbCodes, dbLabels = getCodesAndLabels(modalityTo, classesTo, usePrecomputedCodes)
 
-    if saveToMatFile then
+    if DS_arg then
         local D, S = getDistanceAndSimilarityForMAP(queryCodes, dbCodes, queryLabels, dbLabels)
-        saveDistAndSimToMatFile(D,S)
+        saveDistAndSimToMatFile(D,S,DS_arg)
     end
 
     local map = calcMAP_old(queryCodes, dbCodes, queryLabels, dbLabels)
