@@ -281,13 +281,14 @@ function trainAndEvaluate(modality, numEpochs, evalInterval, plot, arg1, arg2)
     -- elseif g.overallEpoch == 50 then
     --   changeLearningRateForHashLayer(5e3)
     -- end
-
+    local IXt, XIt, IXv, XIv
     if g.overallEpoch % evalInterval == 0 then
-      local IXt, XIt, IXv, XIv = runEvals()
-      addPlotStats(g.overallEpoch, evalInterval, IXt, XIt, IXv, XIv)
+      IXt, XIt, IXv, XIv = runEvals()
     end
 
-    if plot then
+    addPlotStats(g.overallEpoch, evalInterval, IXt, XIt, IXv, XIv)
+
+    if plot and g.overallEpoch % evalInterval == 0 then
       plotCrossModalLoss(g.overallEpoch)
     end
   end

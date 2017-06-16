@@ -71,8 +71,8 @@ function validateParams()
 
     if p.quantRegWeight > 0 and p.balanceRegWeight == 0 then
         return false
-    elseif p.L * math.log(p.k) / math.log(2) ~= 60 then
-        return false
+    -- elseif p.L * math.log(p.k) / math.log(2) ~= 60 then
+    --     return false
     else
         return true
     end
@@ -126,8 +126,10 @@ function getLongParamName(short)
         return 'quantRegWeight'
     elseif short == 'lrd' then
         return 'baseLearningRateDecay'
-    elseif short == 'lrd' then
-        return 'baseLearningRateDecay'
+    elseif short == 'wd' then
+        return 'baseWeightDecay'
+    elseif short == 'mom' then
+        return 'baseMomentum'
     elseif short == 'L' then
         return 'L'
     elseif short == 'k' then
@@ -290,8 +292,8 @@ function trainAndEvaluateAutomatic(modality, numEpochs, evalInterval, paramFacto
   local epoch = 0
   local bestEpochLoss = 1e10 -- a large number
   local bestCmEpochLoss = 1e10 -- best cross-modal epoch loss
---   local bestIXv = 0
---   local bestIXvEpoch = 0
+  local bestIXv = 0
+  local bestIXvEpoch = 0
   local bestAvgV = 0
   local bestAvgVEpoch = 0
   while epoch <= numEpochs and count < p.consecutiveStop do
@@ -317,27 +319,31 @@ function trainAndEvaluateAutomatic(modality, numEpochs, evalInterval, paramFacto
         -- count = count + 1
     end
 
+    local IXt, XIt, IXv, XIv
     if epoch % evalInterval == 0 then
-      local IXt, XIt, IXv, XIv = doRunEvals(g.resultsParamIdx, resultsEvalIdx)
+      IXt, XIt, IXv, XIv = doRunEvals(g.resultsParamIdx, resultsEvalIdx)
       resultsEvalIdx = resultsEvalIdx + 1
+      if IXv > bestIXv then
+        bestIXv = IXv
+        bestIXvEpoch = epoch
+        if IXv > 85 then
+            local name = g.snapshotFilename .. '_bestIXv'
+            saveSnapshot(name, o.params_full, o.gradParams_full)
+        end
+      end
       local avgV = (IXv + XIv) / 2
       if avgV > bestAvgV then
-    --   if IXv > bestIXv then
         count = 0
         bestAvgV = avgV
         bestAvgVEpoch = epoch
-        -- bestIXv = IXv
-        -- bestIXvEpoch = epoch
-        -- if IXv > 85 then
-          local name = g.snapshotFilename .. '_best'
-          saveSnapshot(name, o.params_full, o.gradParams_full)
-        -- end
+        local name = g.snapshotFilename .. '_bestAvg'
+        saveSnapshot(name, o.params_full, o.gradParams_full)
       else
         count = count + 1
       end
-      
-      addPlotStats(epoch, evalInterval, IXt, XIt, IXv, XIv)
     end
+
+    addPlotStats(epoch, evalInterval, IXt, XIt, IXv, XIv) -- IXt, XIt, etc. can be nil if this is not an eval epoch
 
     -- plotCrossModalLoss(epoch) -- TODO: This sometimes causes the program to crash. Plotting at end instead.
   end
@@ -345,7 +351,7 @@ function trainAndEvaluateAutomatic(modality, numEpochs, evalInterval, paramFacto
   statsPrint('****Stopped at epoch ' .. epoch, g.meta, g.sf)
   statsPrint(string.format('Best epoch (avg) loss = %.2f', bestEpochLoss), g.meta, g.sf)
   statsPrint(string.format('Best cross-modal epoch (avg) loss = %.2f', bestCmEpochLoss), g.meta, g.sf)
---   statsPrint(string.format('Best IXv = %.4f @ epoch %d\n\n', bestIXv, bestIXvEpoch), g.meta, g.sf)
+  statsPrint(string.format('Best IXv = %.4f @ epoch %d\n\n', bestIXv, bestIXvEpoch), g.meta, g.sf)
   statsPrint(string.format('Best avgV = %.4f @ epoch %d\n\n', bestAvgV, bestAvgVEpoch), g.meta, g.sf)
 
   plotCrossModalLoss(epoch)
