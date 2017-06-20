@@ -222,12 +222,12 @@ function runEvals()
   -- local IIv = calcMAP(I, I, 'val', 'val', true)
   -- local XXv = calcMAP(X, X, 'val', 'val', true)
 
-  local classesTo
-  if p.datasetType == 'mir' then
+  -- local classesTo
+  -- if p.datasetType == 'mir' then
     classesTo = {'training','val','pretraining'}
-  else
-    classesTo = {'training','val'}
-  end
+  -- else
+  --   classesTo = {'training','val'}
+  -- end
 
   local IXt, IXt_time = calcMAP(I, X, 'training', classesTo, true)
   local XIt, XIt_time = calcMAP(X, I, 'training', classesTo, true)
@@ -238,14 +238,14 @@ function runEvals()
   local IIv = calcMAP(I, I, 'val', classesTo, true)
   local XXv = calcMAP(X, X, 'val', classesTo, true)
 
-  statsPrint(string.format("X -> I train MAP = %.2f", XIt), g.sf, g.sfv)
-  statsPrint(string.format("I -> X train MAP = %.2f", IXt), g.sf, g.sfv)
-  statsPrint(string.format("X -> X train MAP = %.2f", XXt), g.sf, g.sfv)
-  statsPrint(string.format("I -> I train MAP = %.2f", IIt), g.sf, g.sfv)
-  statsPrint(string.format("X -> I val MAP = %.2f", XIv), g.sf, g.sfv)
-  statsPrint(string.format("I -> X val MAP = %.2f", IXv), g.sf, g.sfv)
-  statsPrint(string.format("X -> X val MAP = %.2f", XXv), g.sf, g.sfv)
-  statsPrint(string.format("I -> I val MAP = %.2f", IIv), g.sf, g.sfv)
+  statsPrint(string.format("X -> I train MAP = %.3f", XIt), g.sf, g.sfv)
+  statsPrint(string.format("I -> X train MAP = %.3f", IXt), g.sf, g.sfv)
+  statsPrint(string.format("X -> X train MAP = %.3f", XXt), g.sf, g.sfv)
+  statsPrint(string.format("I -> I train MAP = %.3f", IIt), g.sf, g.sfv)
+  statsPrint(string.format("X -> I val MAP = %.3f", XIv), g.sf, g.sfv)
+  statsPrint(string.format("I -> X val MAP = %.3f", IXv), g.sf, g.sfv)
+  statsPrint(string.format("X -> X val MAP = %.3f", XXv), g.sf, g.sfv)
+  statsPrint(string.format("I -> I val MAP = %.3f", IIv), g.sf, g.sfv)
 
   print(string.format("X -> I train MAP time = %.2f", XIt_time))
   print(string.format("I -> X train MAP time = %.2f", IXt_time))
@@ -634,12 +634,12 @@ function runEverything()
 
   -- These are the hardcoded variable params. Need to reload this file every time one changes.
 
-  local datasetType = 'mir'
+  local datasetType = 'nus'
   local iterationsPerEpoch = 50
   local usePretrainedImageFeatures = false
   local L = 16
   local k = 4
-  local modelType = 'hgr'
+  local modelType = 'hfc'
   local lrMultForHashLayer = 5e4
   local layerSizes = { 2048, 2048, 2048 }
   -- local layerSizes = { 't', 2048 }

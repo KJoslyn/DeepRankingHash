@@ -9,3 +9,4 @@ Results/autoStats/**/*.fig
 README.md
 valprep.sh
 valprocess.lua
+*.xlsx

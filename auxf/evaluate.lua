@@ -127,17 +127,15 @@ function calcPretrainsetHashCodesForNuswide(modalityChar)
         local batchData, batchLabels = d.dataset:getBySplit('pretraining', modalityChar, startIndex, endIndex)
         codes[{ {startIndex, endIndex} }] = calcHashCodes(batchData):reshape(endIndex - startIndex + 1, p.L)
         labels[{ {startIndex, endIndex} }] = batchLabels
-        collectgarbage()
+        if batchNum % 10 == 0 then
+            collectgarbage()
+        end
     end
 
     return codes, labels
 end
 
 function getCodesAndLabelsForModalityAndClass(modality, class, usePrecomputedCodes)
-
-    if class == 'pretraining' and p.datasetType == 'nus' and not p.usePretrainedImageFeatures then
-        return calcPretrainsetHashCodesForNuswide(modalityChar)
-    end
 
     local split, modalityChar
     if class == 'pretraining' then
@@ -158,9 +156,17 @@ function getCodesAndLabelsForModalityAndClass(modality, class, usePrecomputedCod
 
     if usePrecomputedCodes and split.codes then
         return split.codes, split.label
-    elseif class == 'pretraining' and not d.pretrainset[modality].data then -- assumes p.datasetType == 'mir'
+    end
+
+    if class == 'pretraining' and p.datasetType == 'nus' and not p.usePretrainedImageFeatures then
+        split.codes, split.label = calcPretrainsetHashCodesForNuswide(modalityChar)
+        return split.codes, split.label
+    end
+
+    if class == 'pretraining' and not d.pretrainset[modality].data then -- assumes p.datasetType == 'mir'
         d.pretrainset[modality].data, d.pretrainset[modality].label = d.dataset:getBySplit('pretraining', modalityChar, 1, d.dataset:sizePretraining())
     end
+
     local data = split.data
 
     -- Compute and save the computed hash codes

@@ -1,5 +1,17 @@
 require 'fullNet'
 
+function run_6_18()
+
+    -- local pfs = torch.load('/home/kjoslyn/kevin/Project/temp/pfs.t7')
+    -- pfs[3][2] = {0.015}
+    -- pfs[9][2] = {0}
+    -- runAllParamsets('nus',pfs,600,10,50,false,6)
+    -- collectgarbage()
+    pfs = torch.load('/home/kjoslyn/kevin/Project/temp/pfs.t7')
+    pfs[2][2] = {'hfc'}
+    runAllParamsets('nus',pfs,200,10,50,false,4)
+end
+
 function runAllParamsets(datasetType, paramFactorialSet, numEpochs, evalInterval, iterationsPerEpoch, usePretrainedImageFeatures, consecutiveStop)
 
     -- This is the main function to call
@@ -304,7 +316,7 @@ function trainAndEvaluateAutomatic(modality, numEpochs, evalInterval, paramFacto
         changeLearningRateForHashLayer(1e4)
     elseif epoch == 51 then
         changeLearningRateForHashLayer(5e3)
-    elseif epoch == 701 then
+    elseif epoch == 401 then -- 701
         changeLearningRateForHashLayer(1e3)
     end
 
@@ -320,26 +332,26 @@ function trainAndEvaluateAutomatic(modality, numEpochs, evalInterval, paramFacto
     end
 
     local IXt, XIt, IXv, XIv
+    local suffix1 = '_bestIXv'
+    local suffix2 = '_bestAvg'
     if epoch % evalInterval == 0 then
       IXt, XIt, IXv, XIv = doRunEvals(g.resultsParamIdx, resultsEvalIdx)
       resultsEvalIdx = resultsEvalIdx + 1
       if IXv > bestIXv then
         bestIXv = IXv
         bestIXvEpoch = epoch
-        if IXv > 0.85 then
-            local suffix = '_bestIXv'
-            saveSnapshot(g.snapshotFilename .. suffix, o.params_full, o.gradParams_full)
-            prepareTestMAPs(suffix)
-        end
+        -- local suffix = '_bestIXv'
+        saveSnapshot(g.snapshotFilename .. suffix1, o.params_full, o.gradParams_full)
+        prepareTestMAPs(suffix1)
       end
       local avgV = (IXv + XIv) / 2
       if avgV > bestAvgV then
         count = 0
         bestAvgV = avgV
         bestAvgVEpoch = epoch
-        local suffix = '_bestAvg'
-        saveSnapshot(g.snapshotFilename .. suffix, o.params_full, o.gradParams_full)
-        prepareTestMAPs(suffix)
+        -- local suffix = '_bestAvg'
+        saveSnapshot(g.snapshotFilename .. suffix2, o.params_full, o.gradParams_full)
+        prepareTestMAPs(suffix2)
       else
         count = count + 1
       end
