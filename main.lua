@@ -29,7 +29,7 @@ function runAllParamsets(datasetType, paramFactorialSet, numEpochs, evalInterval
     end
     autoStatsDir = autoStatsDir .. '/CM'
 
-    g.statsDir = '/home/kjoslyn/kevin/Project/autoStats/' .. autoStatsDir
+    g.statsDir = g.userPath .. '/kevin/Project/autoStats/' .. autoStatsDir
     g.meta = io.open(g.statsDir .. "/metaStats.txt", 'a')
     g.startStatsId = nil
 
@@ -384,11 +384,17 @@ function prepareTestMAPs(suffix)
     --     classesTo = {'training','val'}
     -- end
 
-    local ixv_name = g.snapshotFilename .. '_DS_data_IX' .. suffix .. '.mat'
+    local ixv_name = g.snapshotFilename .. '_DS_data_IX_val' .. suffix .. '.mat'
     local IXv = calcMAP(I, X, 'val', classesTo, true, ixv_name)
 
-    local xiv_name = g.snapshotFilename .. '_DS_data_XI' .. suffix .. '.mat'
+    local xiv_name = g.snapshotFilename .. '_DS_data_XI_val' .. suffix .. '.mat'
     local XIv = calcMAP(X, I, 'val', classesTo, true, xiv_name)
+
+    local ixt_name = g.snapshotFilename .. '_DS_data_IX_test' .. suffix .. '.mat'
+    local IXt = calcMAP(I, X, 'query', classesTo, true, ixt_name)
+
+    local xit_name = g.snapshotFilename .. '_DS_data_XI_test' .. suffix .. '.mat'
+    local XIt = calcMAP(X, I, 'query', classesTo, true, xit_name)
 end
 
 function doRunEvals(paramIdx, evalIdx)

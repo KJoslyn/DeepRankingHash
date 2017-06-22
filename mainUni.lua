@@ -25,7 +25,7 @@ function runAllParamsets(datasetType, modality, paramFactorialSet, numEpochs, pl
         autoStatsDir = autoStatsDir .. '/imageNet'
     end
 
-    g.statsDir = '/home/kjoslyn/kevin/Project/autoStats/' .. autoStatsDir
+    g.statsDir = g.userPath .. '/kevin/Project/autoStats/' .. autoStatsDir
     g.meta = io.open(g.statsDir .. "/metaStats.txt", 'a')
     g.startStatsId = nil
 

@@ -1,0 +1,11 @@
+1. Make kjoslyn the user
+2. Make /home/kjoslyn/kevin/Project directory and auxf, imagenetloader directories. Use sudo chmod a+w on all directories
+3. On local machine, in ~/Dropbox/Research/DeepHash, edit transfer to add new remote machine
+4. Use ./transfer to transfer .lua files
+5. Make /home/kjoslyn/datasets directory, + mirflickr/ImageData and nuswide/ImageData. Use sudo chmod a+w on these directories
+6. Make val, query, training, pretraining subdirectories. Use sudo chmod a+w on all directories
+7. On Millenium machine in datasets directory, edit transferDataset to add new remote machine
+8. Use ./transferDataset to transfer .mat, .t7, and .jpg files
+
+pretraining list too large...
+snapshots, autostats, etc....

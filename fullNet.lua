@@ -32,6 +32,8 @@ function loadParamsAndPackages(datasetType, iterationsPerEpoch, usePretrainedIma
   o = {} -- optimStates and model parameters
   s = {} -- stats for plotting
 
+  g.userPath = os.getenv("HOME") -- will be either '/home/kejosl' or '/home/kjoslyn'
+
   -- Variable Parameters
   -- numEpochs = 200 -- 416 is max number without truncating an epoch. This is now an input parameter to trainAndEvaluate
   -- p.lrMultForHashLayer = 1e4 -- 1e4, 1e5, etc
@@ -69,12 +71,12 @@ function loadParamsAndPackages(datasetType, iterationsPerEpoch, usePretrainedIma
       p.numClasses = 24
       p.tagDim = 1075
       snapshotDatasetDir = '/mirflickr'
-      g.datasetPath = '/home/kjoslyn/datasets/mirflickr/'
+      g.datasetPath = g.userPath .. '/datasets/mirflickr/'
   elseif datasetType == 'nus' then
       p.numClasses = 21
       p.tagDim = 1000
       snapshotDatasetDir = '/nuswide'
-      g.datasetPath = '/home/kjoslyn/datasets/nuswide/'
+      g.datasetPath = g.userPath .. '/datasets/nuswide/'
   else
       print("Error: Unrecognized datasetType!! Should be mir or nus")
   end
@@ -83,8 +85,8 @@ function loadParamsAndPackages(datasetType, iterationsPerEpoch, usePretrainedIma
   -- Fixed Parameters
   I = 1 -- Table index for image modality - This is its own global variable
   X = 2 -- Table index for text modality - This is its own global variable
-  g.filePath = '/home/kjoslyn/kevin/' -- server
-  g.snapshotDir = '/home/kjoslyn/kevin/Project/snapshots' .. snapshotDatasetDir
+  g.filePath = g.userPath .. '/kevin/' -- server
+  g.snapshotDir = g.userPath .. '/kevin/Project/snapshots' .. snapshotDatasetDir
 
   reloadAuxfPackage('pickSubset')
   reloadAuxfPackage('evaluate')
@@ -634,7 +636,7 @@ function runEverything()
 
   -- These are the hardcoded variable params. Need to reload this file every time one changes.
 
-  local datasetType = 'nus'
+  local datasetType = 'mir'
   local iterationsPerEpoch = 50
   local usePretrainedImageFeatures = false
   local L = 16
@@ -673,4 +675,42 @@ function saveSnapshot(filename, params, gradParams)
     snapshot.gradParams = gradParams
     snapshot.s = s
     torch.save(g.snapshotDir .. '/' .. filename .. '.t7', snapshot)
+end
+
+function getDistAndSimFromSnapshotsInDir(sPath)
+  print('Warning: changing g.snapshotDir to ' .. sPath)
+  g.snapshotDir = sPath -- This must be done for loadModelSnapshot to work properly
+  -- Get filenames only, not full path
+  local sDir = io.popen('find ' .. sPath .. '/*_bestAvg.t7 -type f -exec basename {} \\;')
+  for fn in sDir:lines() do 
+    loadModelSnapshot(m.fullModel, nil, fn)
+    m.fullModel:evaluate()
+    prepareTestMAPs(fn)
+  end
+end
+
+-- TODO: Make these test and not val
+function prepareTestMAPs(fn)
+
+    local classesTo
+    -- if p.datasetType == 'mir' then
+        classesTo = {'training','val','pretraining'}
+    -- else
+    --     classesTo = {'training','val'}
+    -- end
+
+    d.trainset[I].codes = nil
+    d.trainset[X].codes = nil
+    d.pretrainset[I].codes = nil
+    d.pretrainset[X].codes = nil
+    d.valset[I].codes = nil
+    d.valset[X].codes = nil
+    d.testset[I].codes = nil
+    d.testset[X].codes = nil
+
+    local ixv_name = fn .. '_DS_data_IX_bestAvg.mat'
+    local IXv = calcMAP(I, X, 'val', classesTo, true, ixv_name)
+
+    local xiv_name = fn .. '_DS_data_XI_bestAvg.mat'
+    local XIv = calcMAP(X, I, 'val', classesTo, true, xiv_name)
 end

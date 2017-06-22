@@ -26,6 +26,7 @@ local initcheck = argcheck{
        local files = dir.getfiles(path)
        local labelFileFound = false
        local avgStdFileFound = false
+       local tagFileFound = false
        for k,filepath in ipairs(files) do
           if string.match(filepath, 'labels.mat') then
              labelFileFound = true
@@ -33,9 +34,12 @@ local initcheck = argcheck{
           if string.match(filepath, 'avgStdevTrainSet.t7') then
              avgStdFileFound = true
           end
+          if string.match(filepath, 'tags.mat') then
+             tagFileFound = true
+          end
        end
           
-       return labelFileFound and avgStdFileFound
+       return labelFileFound and avgStdFileFound and tagFileFound
    end,
     name="path",
     type="string",
@@ -102,12 +106,6 @@ function dataset:__init(...)
 
    local tags = matio.load(self.path .. '/tags.mat')
    self.tags = tags.tags
---    local tags = matio.load('/home/kjoslyn/datasets/mirflickr/tagsPCA_norm.mat')
---    self.tags = tags.tagsPCA_norm
---    local tags = matio.load('/home/kjoslyn/datasets/mirflickr/tagsPCA_unnorm.mat')
---    self.tags = tags.tagsPCA_unnorm
---    local tags = matio.load('/home/kjoslyn/datasets/mirflickr/tagsPCA_norm1000.mat')
---    self.tags = tags.tagsPCA_norm1000
 
 --    local avgStd = matio.load(path .. '/avgStdevTrainSet.mat')
    local avgStd = torch.load(self.path .. '/avgStdevTrainSet.t7')

@@ -89,7 +89,6 @@ end
 
 function getImageModel()
 
-    -- local model = loadcaffe.load(g.filePath .. 'CNN Model/trainnet.prototxt', g.filePath .. 'CNN Model/snapshot_iter_16000.caffemodel', 'cudnn')
     local model = nn.Sequential()
 
     model:add(cudnn.SpatialConvolution(3,96, 11, 11, 4, 4, 0, 0, 1):init('weight', nninit.xavier, {dist = 'normal', gain = 'relu'}))

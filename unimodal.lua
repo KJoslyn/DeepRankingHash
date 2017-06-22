@@ -115,18 +115,20 @@ function loadParamsAndPackages(datasetType, modality, plotNumEpochs)
 
     matio = require 'matio'
 
+    g.userPath = os.getenv("HOME") -- will be either '/home/kejosl' or '/home/kjoslyn'
+
     local snapshotDatasetDir
     if datasetType == 'mir' then
         p.numClasses = 24
         p.tagDim = 1075 -- Change tagDim if using PCA
         snapshotDatasetDir = '/mirflickr'
-        g.datasetPath = '/home/kjoslyn/datasets/mirflickr/'
+        g.datasetPath = g.userPath .. '/datasets/mirflickr/'
         g.evalTrainAccEpochs = 5
     elseif datasetType == 'nus' then
         p.numClasses = 21
         p.tagDim = 1000
         snapshotDatasetDir = '/nuswide'
-        g.datasetPath = '/home/kjoslyn/datasets/nuswide/'
+        g.datasetPath = g.userPath .. '/datasets/nuswide/'
         g.evalTrainAccEpochs = 1
     else
         print("Error: Unrecognized datasetType!! Should be mir or nus")
@@ -135,7 +137,7 @@ function loadParamsAndPackages(datasetType, modality, plotNumEpochs)
     p.modality = modality
     p.batchSize = 100
 
-    g.snapshotDir = '/home/kjoslyn/kevin/Project/snapshots' .. snapshotDatasetDir
+    g.snapshotDir = g.userPath .. '/kevin/Project/snapshots' .. snapshotDatasetDir
 
     if plotNumEpochs then
         g.plotNumEpochs = plotNumEpochs
