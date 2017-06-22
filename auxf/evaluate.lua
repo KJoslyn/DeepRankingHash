@@ -248,8 +248,9 @@ function saveDistAndSimToMatFile(D,S,DS_arg)
         local dateStr = date.month .. "_" .. date.day .. "_" .. date.hour .. "_" .. date.min
         filename = g.snapshotDir .. '/DS_data_' .. dateStr .. '.mat'
     elseif type(DS_arg) == 'string' then
-        filename = DS_arg
+        filename = g.snapshotDir .. '/' .. DS_arg
     end
+    print(string.format('filename = %s\n', filename))
     matio.save(filename, {D=D_new,S=S_new})
 end
 
