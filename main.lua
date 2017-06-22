@@ -42,7 +42,7 @@ function runAllParamsets(datasetType, paramFactorialSet, numEpochs, evalInterval
     end
 
     local numParamCombs = getNumParamCombs(paramFactorialSet)
-    p.numKFoldSplits = getNumKFoldSplits(paramFactorialSet)
+    p.numRuns = getNumRuns(paramFactorialSet)
 
     g.paramSettingsLegend = {}
     -- TODO: Convert to concatenating tensors (due to validating params)
@@ -61,7 +61,7 @@ function recursiveRunAllParamsets(pfs_part, pfs_full, paramCount, numParams)
         -- printParams(pfs_full)
         if validateParams() then
             -- If this starts a new parameter combination, increment the paramIdx (initialized to 0)
-            if p.numKFoldSplits == 1 or p.kFoldNum == 1 then
+            if p.numRuns == 1 or p.run == 1 then
                 g.resultsParamIdx = g.resultsParamIdx + 1
             end
             runWithParams(pfs_full)
@@ -97,17 +97,17 @@ function getNumParamCombs(pfs)
 
     local count = 1
     for i = 1,#pfs do
-        if pfs[i][1] ~= 'kfn' then
+        if pfs[i][1] ~= 'run' then
             count = count * #pfs[i][2]
         end
     end
     return count
 end
 
-function getNumKFoldSplits(pfs)
+function getNumRuns(pfs)
 
     for i = 1,#pfs do
-        if pfs[i][1] == 'kfn' then
+        if pfs[i][1] == 'run' then
             return #pfs[i][2]
         end
     end
@@ -157,8 +157,8 @@ function getLongParamName(short)
         return 'XHlrMult'
     elseif short == 'ls' then
         return 'layerSizes'
-    elseif short == 'kfn' then
-        return 'kFoldNum'
+    elseif short == 'run' then
+        return 'run'
     end
 end
 
@@ -207,9 +207,6 @@ function prepare()
     loadFullModel(p.modelType, p.XHlrMult, p.IHlrMult, XClrMult, IClrMult, false, p.layerSizes)
     if d.trainset == nil then
         loadData()
-    end
-    if p.numKFoldSplits > 1 and d.kNumLoaded == nil or d.kNumLoaded ~= p.kFoldNum then
-        loadTrainAndValSubsets(p.kFoldNum)
     end
     getOptimStateAndShareParameters('C')
     doGetCriterion(simWeight, p.balanceRegWeight, p.quantRegWeight)
@@ -265,9 +262,6 @@ function printParams(paramFactorialSet, log1, log2)
             str = string.format("%s = %.5f", shortParamName, paramVal)
         end
         statsPrint(str, log1, log2)
-        if shortParamName ~= 'kfn' then
-            fullStr = fullStr .. str .. '\n' 
-        end
     end
     print("\n")
     -- gc = gc + 1
@@ -400,7 +394,7 @@ end
 function doRunEvals(paramIdx, evalIdx)
 
     local IXt, XIt, IXv, XIv = runEvals()
-    local den = 2 * p.numKFoldSplits
+    local den = 2 * p.numRuns
     g.trainResultsMatrix[paramIdx][evalIdx] = g.trainResultsMatrix[paramIdx][evalIdx] + (IXt / den)
     g.trainResultsMatrix[paramIdx][evalIdx] = g.trainResultsMatrix[paramIdx][evalIdx] + (XIt / den)
     g.valResultsMatrix[paramIdx][evalIdx] = g.valResultsMatrix[paramIdx][evalIdx] + (IXv / den)
