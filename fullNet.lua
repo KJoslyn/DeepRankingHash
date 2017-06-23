@@ -591,6 +591,8 @@ function doOneEpochOnModality(modality, logResults)
           return loss, gradParams
       end
       optim.sgd(feval, params, optimState)
+      
+      collectgarbage()
 
   end
 

@@ -227,6 +227,7 @@ function getDistanceAndSimilarityForMAP(queryCodes, databaseCodes, queryLabels, 
         S_timer:resume()
         local queryLabelRep = torch.expand(queryLabels[q]:reshape(p.numClasses,1), p.numClasses, numDB):transpose(1,2)
         S[q] = torch.cmul(queryLabelRep, databaseLabels):max(2)
+        collectgarbage()
         S_timer:stop()
     end
     print(string.format("D calc time: %.2f", D_timer:time().real))
