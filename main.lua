@@ -221,22 +221,27 @@ end
 
 function getStatsFileName()
 
-    local sDir = io.popen('dir \"' .. g.statsDir .. '/\"') 
-    local listAsStr = sDir:read("*a") 
-    io.close(sDir)
-
-    local id = 1
-    while string.match(listAsStr, "stats" .. id .. ".txt") do
-        id = id + 1
-    end
-
-    -- Keep track of which stats files we have written so far
+    -- We do not look at the directory contents every time simply because an error was raised on kejosl
+    -- upon the second time of listing the directory contents -- TODO: Figure out why
     if not g.startStatsId then
-        g.startStatsId = id
-    end
-    g.endStatsId = id
+        local sDir = io.popen('dir \"' .. g.statsDir .. '/\"') 
+        local listAsStr = sDir:read("*a") 
+        io.close(sDir)
 
-    return "stats" .. id .. ".txt"
+        local id = 1
+        while string.match(listAsStr, "stats" .. id .. ".txt") do
+            id = id + 1
+        end
+
+        -- Keep track of which stats files we have written so far
+        g.startStatsId = id
+        g.endStatsId = id
+    else
+        g.endStatsId = g.endStatsId + 1
+    end
+
+    -- endStatsId is also essentially the 'current' stats id
+    return "stats" .. g.endStatsId .. ".txt"
 end
 
 function printParams(paramFactorialSet, log1, log2)
