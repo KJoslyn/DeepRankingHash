@@ -238,8 +238,10 @@ end
 
 function saveDistAndSimToMatFile(D,S,DS_arg)
 
-    local D_new = torch.LongTensor(D:size(1),D:size(2)):copy(D)
-    local S_new = torch.LongTensor(S:size(1),S:size(2)):copy(S)
+    -- local D_new = torch.LongTensor(D:size(1),D:size(2)):copy(D)
+    -- local S_new = torch.LongTensor(S:size(1),S:size(2)):copy(S)
+    local D_new = torch.ByteTensor(D:size(1),D:size(2)):copy(D)
+    local S_new = torch.ByteTensor(S:size(1),S:size(2)):copy(S)
     if not matio then
         matio = require 'matio'
     end
@@ -255,7 +257,7 @@ function saveDistAndSimToMatFile(D,S,DS_arg)
     matio.save(filename, {D=D_new,S=S_new})
 end
 
-function calcMAP(modalityFrom, modalityTo, classesFrom, classesTo, usePrecomputedCodes, DS_arg)
+function calcMAP(modalityFrom, modalityTo, classesFrom, classesTo, usePrecomputedCodes, DS_arg, skipMapCalc)
 
     local timer = torch.Timer()
     timer:resume()
@@ -270,7 +272,11 @@ function calcMAP(modalityFrom, modalityTo, classesFrom, classesTo, usePrecompute
         saveDistAndSimToMatFile(D,S,DS_arg)
     end
 
-    local map = calcMAP_old(queryCodes, dbCodes, queryLabels, dbLabels)
+    -- TODO: This needs to be removed. Split into two functions
+    local map
+    if not skipMapCalc then
+        map = calcMAP_old(queryCodes, dbCodes, queryLabels, dbLabels)
+    end
     -- D, S = getDistanceAndSimilarityForMAP(queryCodes, dbCodes, queryLabels, dbLabels)
     -- local map = compute_map(dbCodes, queryCodes, S)
 
@@ -459,10 +465,22 @@ function plotCrossModalLoss(epoch)
     if not g.plotFilename then
         local date = os.date("*t", os.time())
         local dateStr = date.month .. "_" .. date.day .. "_" .. date.hour .. "_" .. date.min
-        g.plotFilename = g.snapshotDir .. '/' .. dateStr .. '_' .. 'CMplot.pdf' 
+        local ext
+        -- TODO: PDF files were sometimes a problem on kejosl. But currently not plotting at all because gnuplot is causing errors
+        -- on kejosl regardless of file type.
+        if g.userPath == '/home/kejosl' then
+            ext = '.png'
+        else
+            ext = '.pdf'
+        end
+        g.plotFilename = g.snapshotDir .. '/' .. dateStr .. '_' .. 'CMplot' .. ext 
     end
 
-    gnuplot.pdffigure(g.plotFilename)
+    if g.userPath == '/home/kejosl' then
+        gnuplot.pngfigure(g.plotFilename)
+    else
+        gnuplot.pdffigure(g.plotFilename)
+    end
 
     gnuplot.plot(unpack(lines))
 

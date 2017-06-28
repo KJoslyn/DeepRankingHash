@@ -91,7 +91,7 @@ function calcMAP_old(queryCodes, databaseCodes, queryLabels, databaseLabels, ver
     sumAPs = 0
     for q = 1,Q do
 
-        -- collectgarbage()
+        collectgarbage()
 
         local query = queryCodes[q]:reshape(p.L, 1)
         query = torch.expand(query, p.L, numDB):t()

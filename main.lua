@@ -1,18 +1,6 @@
 require 'fullNet'
 
-function run_6_18()
-
-    -- local pfs = torch.load('/home/kjoslyn/kevin/Project/temp/pfs.t7')
-    -- pfs[3][2] = {0.015}
-    -- pfs[9][2] = {0}
-    -- runAllParamsets('nus',pfs,600,10,50,false,6)
-    -- collectgarbage()
-    pfs = torch.load('/home/kjoslyn/kevin/Project/temp/pfs.t7')
-    pfs[2][2] = {'hfc'}
-    runAllParamsets('nus',pfs,200,10,50,false,4)
-end
-
-function runAllParamsets(datasetType, paramFactorialSet, numEpochs, evalInterval, iterationsPerEpoch, usePretrainedImageFeatures, consecutiveStop)
+function runAllParamsets(datasetType, paramFactorialSet, numEpochs, evalInterval, iterationsPerEpoch, usePretrainedImageFeatures, consecutiveStop, startStatsId)
 
     -- This is the main function to call
 
@@ -31,7 +19,7 @@ function runAllParamsets(datasetType, paramFactorialSet, numEpochs, evalInterval
 
     g.statsDir = g.userPath .. '/kevin/Project/autoStats/' .. autoStatsDir
     g.meta = io.open(g.statsDir .. "/metaStats.txt", 'a')
-    g.startStatsId = nil
+    g.startStatsId = startStatsId
 
     p.numEpochs = numEpochs
     p.evalInterval = evalInterval
@@ -51,8 +39,72 @@ function runAllParamsets(datasetType, paramFactorialSet, numEpochs, evalInterval
     g.resultsParamIdx = 0
 
     recursiveRunAllParamsets(paramFactorialSet, paramFactorialSet, 0, #paramFactorialSet)
+    -- recursiveCreatePfsS(paramFactorialSet, paramFactorialSet, 0, #paramFactorialSet)
 
     io.close(g.meta)
+end
+
+function fixPfsS(pfsS)
+
+-- Assumptions: 'wd' is the 3rd parameter in pfs
+-- 'lrd' is the 4th parameter in pfs
+-- Actually, the two can be reversed
+
+    for i = 1,#pfsS do
+        local pfs = pfsS[i]
+        pfs[1] = pfs[2]
+        pfs[2] = pfs[4]
+        pfs[5] = {'wd', {0}}
+        pfs[6] = {'lrd', {0}}
+        for j = 5,12 do
+            pfs[j-2] = pfs[j]
+        end
+        pfs[11] = nil
+        pfs[12] = nil
+    end
+end
+
+local function recursiveCreatePfsS(pfs_part, pfs_full, paramCount, numParams)
+
+    if paramCount == numParams then
+        -- printParams(pfs_full)
+        if validateParams() then
+            if not g.pfsS then g.pfsS = {} end
+            local pfsS_1 = table.shallow_copy(g.pfsS_one)
+            local i = 1
+            for key, value in pairs(pfsS_1) do
+                pfsS_1[i] = {key,{value}}
+                pfsS_1[key] = nil
+                i = i + 1
+            end
+            g.pfsS[#g.pfsS + 1] = pfsS_1
+        end
+    else
+        local thisParamset = pfs_part[1]
+        local paramName = thisParamset[1]
+        local valueSet = thisParamset[2]
+        for _, value in pairs(valueSet) do
+
+            local oldValue = setParamValue(paramName, value)
+            if not g.pfsS_one then g.pfsS_one = {} end
+            g.pfsS_one[paramName] = value
+            recursiveCreatePfsS( { unpack(pfs_part, 2, #pfs_part) }, pfs_full, paramCount + 1, numParams)
+            setParamValue(paramName, oldValue)
+        end
+    end
+end
+
+function createPfsS(pfs)
+
+    require 'auxf.createModel'
+    p = {}
+    g = {}
+    local userPath = os.getenv("HOME") -- will be either '/home/kejosl' or '/home/kjoslyn'
+
+    recursiveCreatePfsS(pfs, pfs, 0, #pfs)
+
+    fixPfsS(g.pfsS)
+    torch.save(userPath .. '/kevin/Project/temp/pfsS.t7', g.pfsS)
 end
 
 function recursiveRunAllParamsets(pfs_part, pfs_full, paramCount, numParams)
@@ -82,6 +134,8 @@ end
 function validateParams()
 
     if p.quantRegWeight > 0 and p.balanceRegWeight == 0 then
+        return false
+    elseif p.balanceRegWeight == 0 and p.quantRegWeight == 0 then
         return false
     -- elseif p.L * math.log(p.k) / math.log(2) ~= 60 then
     --     return false
@@ -221,26 +275,33 @@ end
 
 function getStatsFileName()
 
-    -- We do not look at the directory contents every time simply because an error was raised on kejosl
-    -- upon the second time of listing the directory contents -- TODO: Figure out why
-    if not g.startStatsId then
-        local sDir = io.popen('dir \"' .. g.statsDir .. '/\"') 
-        local listAsStr = sDir:read("*a") 
-        io.close(sDir)
+    -- -- We do not look at the directory contents every time simply because an error was raised on kejosl
+    -- -- upon the second time of listing the directory contents -- TODO: Figure out why
+    -- if not g.startStatsId then
+    --     local sDir = io.popen('dir \"' .. g.statsDir .. '/\"') 
+    --     local listAsStr = sDir:read("*a") 
+    --     io.close(sDir)
 
-        local id = 1
-        while string.match(listAsStr, "stats" .. id .. ".txt") do
-            id = id + 1
-        end
+    --     local id = 1
+    --     while string.match(listAsStr, "stats" .. id .. ".txt") do
+    --         id = id + 1
+    --     end
 
-        -- Keep track of which stats files we have written so far
-        g.startStatsId = id
-        g.endStatsId = id
-    else
+    --     -- Keep track of which stats files we have written so far
+    --     g.startStatsId = id
+    --     g.endStatsId = id
+    -- else
+    --     g.endStatsId = g.endStatsId + 1
+    -- end
+
+    -- return "stats1.txt"
+
+    -- -- endStatsId is also essentially the 'current' stats id
+    if g.endStatsId then
         g.endStatsId = g.endStatsId + 1
+    else
+        g.endStatsId = g.startStatsId
     end
-
-    -- endStatsId is also essentially the 'current' stats id
     return "stats" .. g.endStatsId .. ".txt"
 end
 
@@ -267,6 +328,7 @@ function printParams(paramFactorialSet, log1, log2)
             str = string.format("%s = %.5f", shortParamName, paramVal)
         end
         statsPrint(str, log1, log2)
+        fullStr = fullStr .. str .. '\n'
     end
     print("\n")
     -- gc = gc + 1
@@ -341,7 +403,7 @@ function trainAndEvaluateAutomatic(modality, numEpochs, evalInterval, paramFacto
         bestIXvEpoch = epoch
         -- local suffix = '_bestIXv'
         saveSnapshot(g.snapshotFilename .. suffix1, o.params_full, o.gradParams_full)
-        prepareTestMAPs(suffix1)
+        prepareValAndTestMAPs(suffix1)
       end
       local avgV = (IXv + XIv) / 2
       if avgV > bestAvgV then
@@ -350,7 +412,7 @@ function trainAndEvaluateAutomatic(modality, numEpochs, evalInterval, paramFacto
         bestAvgVEpoch = epoch
         -- local suffix = '_bestAvg'
         saveSnapshot(g.snapshotFilename .. suffix2, o.params_full, o.gradParams_full)
-        prepareTestMAPs(suffix2)
+        prepareValAndTestMAPs(suffix2)
       else
         count = count + 1
       end
@@ -367,14 +429,21 @@ function trainAndEvaluateAutomatic(modality, numEpochs, evalInterval, paramFacto
   statsPrint(string.format('Best IXv = %.4f @ epoch %d\n\n', bestIXv, bestIXvEpoch), g.meta, g.sf)
   statsPrint(string.format('Best avgV = %.4f @ epoch %d\n\n', bestAvgV, bestAvgVEpoch), g.meta, g.sf)
 
-  plotCrossModalLoss(epoch)
-  gnuplot.closeall()
+--   local g_s = {}
+--   g_s.g = g
+--   g_s.s = s
+--   torch.save(g.snapshotDir .. '/stats' .. g.endStatsId .. '_g_s.t7', g_s)
+  -- There is a problem sometimes with plotting on kejosl which causes an error
+  if g.userPath == '/home/kjoslyn' then
+    plotCrossModalLoss(epoch)
+    gnuplot.closeall()
+  end
 
   io.close(g.sf)
 end
 
 -- TODO: Make these test and not val
-function prepareTestMAPs(suffix)
+function prepareValAndTestMAPs(suffix)
 
     local classesTo
     -- if p.datasetType == 'mir' then

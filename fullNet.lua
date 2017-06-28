@@ -638,12 +638,12 @@ function runEverything()
 
   -- These are the hardcoded variable params. Need to reload this file every time one changes.
 
-  local datasetType = 'mir'
+  local datasetType = 'nus'
   local iterationsPerEpoch = 50
   local usePretrainedImageFeatures = false
   local L = 16
   local k = 4
-  local modelType = 'hfc'
+  local modelType = 'hgr'
   local lrMultForHashLayer = 5e4
   local layerSizes = { 2048, 2048, 2048 }
   -- local layerSizes = { 't', 2048 }
@@ -683,16 +683,15 @@ function getDistAndSimFromSnapshotsInDir(sPath)
   print('Warning: changing g.snapshotDir to ' .. sPath)
   g.snapshotDir = sPath -- This must be done for loadModelSnapshot to work properly
   -- Get filenames only, not full path
-  local sDir = io.popen('find ' .. sPath .. '/*_bestAvg.t7 -type f -exec basename {} \\;')
+  local sDir = io.popen('find ' .. sPath .. '/*_bestAvg.t7 -type f -exec basename {} \\; | sort -V')
   for fn in sDir:lines() do 
     loadModelSnapshot(m.fullModel, nil, fn)
     m.fullModel:evaluate()
-    prepareTestMAPs(fn)
+    prepareTestMAPsFromSnapshot(fn)
   end
 end
 
--- TODO: Make these test and not val
-function prepareTestMAPs(fn)
+function prepareTestMAPsFromSnapshot(fn)
 
     local classesTo
     -- if p.datasetType == 'mir' then
@@ -710,9 +709,10 @@ function prepareTestMAPs(fn)
     d.testset[I].codes = nil
     d.testset[X].codes = nil
 
-    local ixv_name = fn .. '_DS_data_IX_bestAvg.mat'
-    local IXv = calcMAP(I, X, 'val', classesTo, true, ixv_name)
+    local ixv_name = fn .. '_DS_data_IX_test_bestAvg.mat'
+    -- TODO: Last arg needs to be removed when calcMAP is split into two functions
+    local IXv = calcMAP(I, X, 'query', classesTo, true, ixv_name, true)
 
-    local xiv_name = fn .. '_DS_data_XI_bestAvg.mat'
-    local XIv = calcMAP(X, I, 'val', classesTo, true, xiv_name)
+    local xiv_name = fn .. '_DS_data_XI_test_bestAvg.mat'
+    local XIv = calcMAP(X, I, 'query', classesTo, true, xiv_name, true)
 end
