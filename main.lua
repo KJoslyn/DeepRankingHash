@@ -135,10 +135,10 @@ function validateParams()
 
     if p.quantRegWeight > 0 and p.balanceRegWeight == 0 then
         return false
-    elseif p.balanceRegWeight == 0 and p.quantRegWeight == 0 then
-        return false
     -- elseif p.L * math.log(p.k) / math.log(2) ~= 60 then
     --     return false
+    -- elseif p.modelType == 'hfc' and p.quantRegWeight > 0 then
+    --    return false
     else
         return true
     end
@@ -344,7 +344,7 @@ function getLegendSize()
     return idx - 1
 end
 
-function trainAndEvaluateAutomatic(modality, numEpochs, evalInterval, paramFactorialSet)
+function trainAndEvaluateAutomatic(modality, numEpochs, evalInterval, paramFactorialSet, startEpoch)
 
   local resultsEvalIdx = 1
 
@@ -362,11 +362,9 @@ function trainAndEvaluateAutomatic(modality, numEpochs, evalInterval, paramFacto
   g.snapshotFilename = statsFileName
 
   local count = 0
-  local epoch = 0
+  local epoch = startEpoch or 0
   local bestEpochLoss = 1e10 -- a large number
   local bestCmEpochLoss = 1e10 -- best cross-modal epoch loss
-  local bestIXv = 0
-  local bestIXvEpoch = 0
   local bestAvgV = 0
   local bestAvgVEpoch = 0
   while epoch <= numEpochs and count < p.consecutiveStop do
@@ -393,32 +391,36 @@ function trainAndEvaluateAutomatic(modality, numEpochs, evalInterval, paramFacto
     end
 
     local IXt, XIt, IXv, XIv
-    local suffix1 = '_bestIXv'
     local suffix2 = '_bestAvg'
+    local plotStatsAdded = false
     if epoch % evalInterval == 0 then
-      IXt, XIt, IXv, XIv = doRunEvals(g.resultsParamIdx, resultsEvalIdx)
-      resultsEvalIdx = resultsEvalIdx + 1
-      if IXv > bestIXv then
-        bestIXv = IXv
-        bestIXvEpoch = epoch
-        -- local suffix = '_bestIXv'
-        saveSnapshot(g.snapshotFilename .. suffix1, o.params_full, o.gradParams_full)
-        prepareValAndTestMAPs(suffix1)
-      end
-      local avgV = (IXv + XIv) / 2
-      if avgV > bestAvgV then
-        count = 0
-        bestAvgV = avgV
-        bestAvgVEpoch = epoch
-        -- local suffix = '_bestAvg'
-        saveSnapshot(g.snapshotFilename .. suffix2, o.params_full, o.gradParams_full)
-        prepareValAndTestMAPs(suffix2)
+      if epoch < 100 then
+        IXt = 0
+        XIt = 0
+        IXv = 0
+        XIv = 0
       else
-        count = count + 1
+        IXt, XIt, IXv, XIv = doRunEvals(g.resultsParamIdx, resultsEvalIdx)
+        addPlotStats(epoch, evalInterval, IXt, XIt, IXv, XIv) -- IXt, XIt, etc. can be nil if this is not an eval epoch
+        plotStatsAdded = true
+        local avgV = (IXv + XIv) / 2
+        if avgV > bestAvgV then
+            count = 0
+            bestAvgV = avgV
+            bestAvgVEpoch = epoch
+            -- local suffix = '_bestAvg'
+            saveSnapshot(g.snapshotFilename .. suffix2, o.params_full, o.gradParams_full)
+            prepareValAndTestMAPs(suffix2)
+        else
+            count = count + 1
+        end
       end
+      resultsEvalIdx = resultsEvalIdx + 1
     end
 
-    addPlotStats(epoch, evalInterval, IXt, XIt, IXv, XIv) -- IXt, XIt, etc. can be nil if this is not an eval epoch
+    if not plotStatsAdded then
+        addPlotStats(epoch, evalInterval, IXt, XIt, IXv, XIv) -- IXt, XIt, etc. can be nil if this is not an eval epoch
+    end
 
     -- plotCrossModalLoss(epoch) -- TODO: This sometimes causes the program to crash. Plotting at end instead.
   end
@@ -426,7 +428,6 @@ function trainAndEvaluateAutomatic(modality, numEpochs, evalInterval, paramFacto
   statsPrint('****Stopped at epoch ' .. epoch, g.meta, g.sf)
   statsPrint(string.format('Best epoch (avg) loss = %.2f', bestEpochLoss), g.meta, g.sf)
   statsPrint(string.format('Best cross-modal epoch (avg) loss = %.2f', bestCmEpochLoss), g.meta, g.sf)
-  statsPrint(string.format('Best IXv = %.4f @ epoch %d\n\n', bestIXv, bestIXvEpoch), g.meta, g.sf)
   statsPrint(string.format('Best avgV = %.4f @ epoch %d\n\n', bestAvgV, bestAvgVEpoch), g.meta, g.sf)
 
 --   local g_s = {}
@@ -474,4 +475,25 @@ function doRunEvals(paramIdx, evalIdx)
     g.valResultsMatrix[paramIdx][evalIdx] = g.valResultsMatrix[paramIdx][evalIdx] + (IXv / den)
     g.valResultsMatrix[paramIdx][evalIdx] = g.valResultsMatrix[paramIdx][evalIdx] + (XIv / den)
     return IXt, XIt, IXv, XIv
+end
+
+function createEmptyGSaved()
+    local gSaved = {}
+    torch.save('/home/kejosl/kevin/Project/temp/gSaved.t7', gSaved)
+end
+
+function loadPfs()
+    pfs = torch.load('/home/kejosl/kevin/Project/temp/pfs.t7')
+end
+
+function savePfs()
+    torch.save('/home/kejosl/kevin/Project/temp/pfs.t7', pfs)
+end
+
+function loadPfsS()
+    pfsS = torch.load('/home/kejosl/kevin/Project/temp/pfsS.t7')
+end
+
+function loadGSaved()
+    gSaved = torch.load('/home/kejosl/kevin/Project/temp/gSaved.t7')
 end

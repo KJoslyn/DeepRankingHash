@@ -493,14 +493,14 @@ function dataset:getImagePathByClass(class, index)
    return ffi.string(torch.data(self.imagePath[self.classList[class][index]]))
 end
 
-function dataset:getBySplit(classArg, modality, i1, i2, permutation)
+function dataset:getBySplit(classArg, modality, i1, i2, permutation, skipNormalize)
     -- 'Class' means the same thing as 'split' in this sense.
     -- classArg can be a string or a table of strings, belonging to 'training', 'query', 'val', or 'pretraining'.
 
    if modality == 'B' then -- return images and tags
       local im, tags, labels
-      im, labels = self:getBySplit(classArg, 'I', i1, i2, permutation)
-      tags = self:getBySplit(classArg, 'X', i1, i2, permutation)
+      im, labels = self:getBySplit(classArg, 'I', i1, i2, permutation, skipNormalize)
+      tags = self:getBySplit(classArg, 'X', i1, i2, permutation, skipNormalize)
       return im, tags, labels
    end
 
@@ -526,7 +526,9 @@ function dataset:getBySplit(classArg, modality, i1, i2, permutation)
       else
          data, labels = doGetModality(self, 'I', classes, i1, i2, permutation)
       end
-      data = self:normalize(data)
+      if not skipNormalize then
+        data = self:normalize(data)
+      end
    elseif modality == 'X' then
       data, labels = doGetModality(self, 'X', classes, i1, i2, permutation)
    else

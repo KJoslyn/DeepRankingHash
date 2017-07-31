@@ -37,7 +37,7 @@ function loadParamsAndPackages(datasetType, iterationsPerEpoch, usePretrainedIma
   -- Variable Parameters
   -- numEpochs = 200 -- 416 is max number without truncating an epoch. This is now an input parameter to trainAndEvaluate
   -- p.lrMultForHashLayer = 1e4 -- 1e4, 1e5, etc
-  -- p.modelType = 'gr' -- 'hgr', 'fc', 'hfc'
+  -- p.modelType = 'gr' -- 'hgr', 'fc', 'hfc', 'hgr2'
 
   -- In main.lua, these are params in pfs. Thus, loadParamsAndPackages may be called without these params in main.lua.
   p.L = L -- 8 
@@ -142,7 +142,7 @@ function loadFullModel(modelType, XHlrMult, IHlrMult, XClrMult, IClrMult, loadSi
   end
 end
 
-function loadData() 
+function loadData(useDCMH_data) 
 
   if p.usePretrainedImageFeatures then
     local data = torch.load(g.datasetPath .. 'alexNetFeatures_deep.t7')
@@ -164,17 +164,31 @@ function loadData()
     d.pretrainset[I] = {}
     d.pretrainset[X] = {}
 
-    local imageRootPath = g.datasetPath .. 'ImageData'
-    d.dataset = imageLoader{path=imageRootPath, sampleSize={3,227,227}, splitFolders={'training', 'pretraining', 'val', 'query'}}
+    local imageRootPath, ss, skipNormalize
+    if useDCMH_data then
+      imageRootPath = g.datasetPath .. 'ImageData/DCMH'
+      ss = {3,224,224} 
+      skipNormalize = true
+    else
+      imageRootPath = g.datasetPath .. 'ImageData'
+      ss = {3,227,227} 
+      skipNormalize = false
+    end
+    d.dataset = imageLoader{path=imageRootPath, sampleSize=ss, splitFolders={'training', 'pretraining', 'val', 'query'}}
 
-    d.trainset[I].data, d.trainset[X].data, d.trainset[I].label = d.dataset:getBySplit('training', 'B', 1, d.dataset:sizeTrain())
+    d.trainset[I].data, d.trainset[X].data, d.trainset[I].label = d.dataset:getBySplit('training', 'B', 1, d.dataset:sizeTrain(), nil, skipNormalize)
     d.trainset[X].label = d.trainset[I].label
 
-    d.valset[I].data, d.valset[X].data, d.valset[I].label = d.dataset:getBySplit('val', 'B', 1, d.dataset:sizeVal())
+    d.valset[I].data, d.valset[X].data, d.valset[I].label = d.dataset:getBySplit('val', 'B', 1, d.dataset:sizeVal(), nil, skipNormalize)
     d.valset[X].label = d.valset[I].label
 
-    d.testset[I].data, d.testset[X].data, d.testset[I].label = d.dataset:getBySplit('query', 'B', 1, d.dataset:sizeTest())
+    d.testset[I].data, d.testset[X].data, d.testset[I].label = d.dataset:getBySplit('query', 'B', 1, d.dataset:sizeTest(), nil, skipNormalize)
     d.testset[X].label = d.testset[I].label
+
+    if useDCMH_data then
+      d.pretrainset[I].data, d.pretrainset[X].data, d.pretrainset[I].label = d.dataset:getBySplit('pretraining', 'B', 1, d.dataset:sizePretraining(), nil, skipNormalize)
+      d.pretrainset[X].label = d.pretrainset[I].label
+    end
   end
 
   local pairs = torch.load(g.datasetPath .. 'crossModalPairs.t7')
@@ -508,6 +522,7 @@ function getInputAndTarget(modality, trainBatch)
   -- gamma2 = torch.expand(gamma2:resize(1,p.L*p.k), batchSize, p.L*p.k)
   -- local bt = - p.L * (trainSize / p.k)
   -- balance_target = torch.CudaTensor(batchSize):fill(bt)
+    
 
   local quant_target = torch.CudaTensor(batchSize):fill(0.5*p.L*p.k)
 
@@ -638,7 +653,7 @@ function runEverything()
 
   -- These are the hardcoded variable params. Need to reload this file every time one changes.
 
-  local datasetType = 'nus'
+  local datasetType = 'mir'
   local iterationsPerEpoch = 50
   local usePretrainedImageFeatures = false
   local L = 16
@@ -675,6 +690,8 @@ function saveSnapshot(filename, params, gradParams)
     -- snapshot.params, snapshot.gparams = m.fullModel:getParameters()
     snapshot.params = params
     snapshot.gradParams = gradParams
+    snapshot.state_dfdx = o.optimState_full.dfdx
+    snapshot.evalCounter = o.optimState_full.evalCounter
     snapshot.s = s
     torch.save(g.snapshotDir .. '/' .. filename .. '.t7', snapshot)
 end

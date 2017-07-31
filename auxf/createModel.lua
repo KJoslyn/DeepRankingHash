@@ -31,13 +31,13 @@ function getHashLayerFullyConnected(prevLayerSize, hashLayerSize, lrMultForHashL
     return model
 end
 
-function getHashLayerGrouped(prevLayerSize, L, k, lrMultForHashLayer, addHiddenLayer)
+function getHashLayerGrouped(prevLayerSize, L, k, lrMultForHashLayer, addFirstHiddenLayer, addSecondHiddenLayer)
 
     local groupSize = math.ceil(prevLayerSize / L)
 
     local hashLayer = nn.Sequential()
 
-    if addHiddenLayer then
+    if addFirstHiddenLayer then
         hashLayer:add(nn.Linear(prevLayerSize, groupSize * L)
                  :init('weight', nninit.xavier, {dist = 'normal'})
                  :learningRate('weight', lrMultForHashLayer)
@@ -47,17 +47,30 @@ function getHashLayerGrouped(prevLayerSize, L, k, lrMultForHashLayer, addHiddenL
     hashLayer:add(nn.Reshape(L, groupSize))
     hashLayer:add(nn.SplitTable(2))
 
-    map1 = nn.MapTable()
-    map1:add(nn.Linear(groupSize, k)
+    local map1
+    if addSecondHiddenLayer then
+        map1 = nn.MapTable()
+        map1:add(nn.Linear(groupSize, groupSize)
+            :init('weight', nninit.xavier, {dist = 'normal'})
+            :learningRate('weight', lrMultForHashLayer)
+            :learningRate('bias', lrMultForHashLayer))
+    end
+
+    local map2 = nn.MapTable()
+    map2:add(nn.Linear(groupSize, k)
         :init('weight', nninit.xavier, {dist = 'normal'})
         :learningRate('weight', lrMultForHashLayer)
         :learningRate('bias', lrMultForHashLayer))
 
-    map2 = nn.MapTable()
-    map2:add(nn.SoftMax())
 
-    hashLayer:add(map1)
+    local map3 = nn.MapTable()
+    map3:add(nn.SoftMax())
+
+    if map1 then
+        hashLayer:add(map1)
+    end
     hashLayer:add(map2)
+    hashLayer:add(map3)
 
     hashLayer:add(nn.JoinTable(2))
 
@@ -333,10 +346,12 @@ function getHashLayer(prevLayerSize, type, L, k, lrMultForHashLayer)
         hashLayer = getHashLayerFullyConnected(prevLayerSize, L*k, lrMultForHashLayer, true) 
     elseif type == 'fc' then
         hashLayer = getHashLayerFullyConnected(prevLayerSize, L*k, lrMultForHashLayer, false) 
+    elseif type == 'hgr2' then
+        hashLayer = getHashLayerGrouped(prevLayerSize, L, k, lrMultForHashLayer, true, true)
     elseif type == 'hgr' then
-        hashLayer = getHashLayerGrouped(prevLayerSize, L, k, lrMultForHashLayer, true)
+        hashLayer = getHashLayerGrouped(prevLayerSize, L, k, lrMultForHashLayer, true, false)
     elseif type == 'gr' then
-        hashLayer = getHashLayerGrouped(prevLayerSize, L, k, lrMultForHashLayer, false)
+        hashLayer = getHashLayerGrouped(prevLayerSize, L, k, lrMultForHashLayer, false, false)
     else
         print('ERROR: Unrecognized hash layer type')
     end
@@ -542,4 +557,8 @@ function loadModelSnapshot(model, snapshot2ndLevelDir, snapshotFileName)
       params[ {{ startIndex, endIndex }} ]:copy(snapshot.params[ {{ startIndex, endIndex }} ])
   end
 
+  if o.optimState_full and snapshot.state_dfdx then
+      o.optimState_full.dfdx = snapshot.state_dfdx
+      o.optimState_full.evalCounter = snapshot.evalCounter
+  end
 end

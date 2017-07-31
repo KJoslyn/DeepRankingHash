@@ -5,8 +5,8 @@ require 'main'
 -- 1. Check runExp to make sure number of runs is correct
 -- 2. Check local variables in this file
 -- 3. Create empty gSaved.t7 file (gSaved = {})
--- 4. Create pfsS.t7 file by using createPfsS() in main.lua
--- 5. Check validateParams() in main.lua
+-- 4. Check validateParams() in main.lua
+-- 5. Create pfsS.t7 file by using createPfsS() in main.lua
 -- 6. Check plotCrossModalLoss in main.lua
 
 -- Assumptions: 'run' is the last parameter in pfs
@@ -14,12 +14,12 @@ require 'main'
 -- 'lrd' is the 3rd or 4th parameter in pfs (assumed in fixPfsS() in main.lua)
 
 -- TODO: Check all of these
-local numRuns = 2
+local numRuns = 1 -- Number of runs for each parameter setting
 local datasetType = 'nus'
-local numEpochs = 200
+local numEpochs = 300
 local evalInterval = 10
-local consecutiveStop = 4
-local startStatsId = 10
+local consecutiveStop = 10
+local startStatsId = 55
 loadParamsAndPackages(datasetType, 50, false)
 
 local autoStatsDir
