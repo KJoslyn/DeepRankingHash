@@ -1,0 +1,487 @@
+\documentclass[letterpaper]{article}
+\usepackage{aaai18}
+\usepackage{times}
+\usepackage{helvet}
+\usepackage{courier}
+\usepackage{url}
+\usepackage{graphicx}
+\frenchspacing
+\usepackage{amsmath}
+% \usepackage{multirow}
+\usepackage{amsfonts} % TODO: Is this ok?
+\usepackage{amssymb}
+\usepackage{booktabs}
+\usepackage{verbatim}
+\usepackage{subcaption}
+% \usepackage{multirow}
+% [TODO: Is this required?]
+\usepackage{etoolbox}
+\makeatletter
+\patchcmd{\@makecaption}
+{\scshape}
+{}
+{}
+{}
+\makeatother
+% Add additional packages here. The following
+% packages may NOT be used (this list
+% is not exhaustive:
+% authblk, caption, CJK, float, fullpage, geometry,
+%hyperref, layout, nameref, natbib, savetrees,
+%setspace, titlesec, tocbibind, ulem
+
+% correct bad hyphenation here
+\hyphenation{}
+
+\newcommand{\argmax}{\operatornamewithlimits{argmax}}
+\DeclareMathOperator{\sign}{sign}
+\DeclareMathOperator{\trace}{tr}
+\DeclareMathOperator{\abs}{abs}
+\DeclareMathAlphabet\mathbfcal{OMS}{cmsy}{b}{n}
+
+\newcommand{\bpx}{\mathbf{B_\mathcal{X}}}
+\newcommand{\bpy}{\mathbf{B_\mathcal{Y}}}
+\newcommand{\bps}{\mathbf{B_*}}
+% \newcommand{\bpy}{\mathbf{B'_\mathcal{Y}}}
+\newcommand{\WX}{\mathbf{W}_\mathcal{X}}
+\newcommand{\WY}{\mathbf{W}_\mathcal{Y}}
+\newcommand{\X}{\mathbf{X}}
+\newcommand{\Y}{\mathbf{Y}}
+\newcommand{\htwoxv}{\vec{\mathbf{h_{2\mathbfcal{X}}}}}
+\newcommand{\htwoyv}{\vec{\mathbf{h_{2\mathbfcal{Y}}}}}
+\newcommand{\xii}{\mathbf{x}_i}
+\newcommand{\yj}{\mathbf{y}_j}
+
+
+%
+\setlength{\pdfpagewidth}{8.5in}
+\setlength{\pdfpageheight}{11in}
+%
+% PDFINFO
+% You are required to complete the following
+% for pass-through to the PDF.
+% No LaTeX commands of any kind may be
+% entered. The parentheses and spaces
+% are an integral part of the
+% pdfinfo script and must not be removed.
+%
+\pdfinfo{
+	/Title (Cross-Modal Retrieval Using [TODO] Deep Ranking Hash Networks)
+	/Author (Kevin Joslyn, Jane Doe [TODO])
+	/Keywords (Input your keywords in this optional area [TODO])
+}
+%
+%Section Numbers
+% Uncomment if you want to use section numbers
+% and change the 0 to a 1 or 2
+\setcounter{secnumdepth}{2}
+% Title and Author Information Must Immediately Follow
+% the pdfinfo within the preamble
+%
+\begin{document}
+\title{Cross-Modal Retrieval Using [TODO] Deep Ranking Hash Networks}
+\author{Kevin Joslyn \ and Author 2 [TODO]\\
+Address line\\
+Address line\\
+\ And\\
+Author 3\\
+Address line\\
+Address line
+}
+%
+
+\maketitle
+
+\begin{abstract}
+	
+Cross-modal hashing has become a popular research topic in recent years due to the vast availability of multimedia and the desire to relate these objects from different modalities in a way that preserves their semantic meaning. Using text to retrieve relevant images, or vice versa, is a well-studied yet challenging problem that we seek to address in this paper. Here, we propose a novel deep learning architecture called the [TODO] that uses a class of feature-ranking methods to determine the hash codes for the image and text modalities in a common hamming space. Specifically, [TODO] learns a set of nonlinear subspaces on which to project the original features, so that the hash code can be determined by the relative ordering of projected feature values in a given optimized subspace rather than the actual feature values themselves.  The network relies upon a pre-trained deep classifier network for each modality and a hashing segment responsible for optimizing the hash codes based on the known similarity of the training image-text pairs. In this paper, we propose both architectural and mathematical methods designed specifically for ranking-based hashing in order to achieve decorrelation between the bits, bit balancing, and quantization. Finally, through extensive experimentation on two widely-used multimodal datasets, we show that the combination of these techniques can achieve state-of the-art performance on several baselines.
+	
+\end{abstract}
+
+\section{Introduction}
+
+The prevalence of digital and social media in modern society has created a world that is dominated by multimedia. For billions of people around the globe, images, stories, social posts and even videos are just a query and a click away. A relatively new but already popular research area inspired by the fresh abundance of multimedia is cross-modal hashing for multimodal retrieval. The problem is defined as follows: given a query from a certain modality (i.e. image or text), the goal is to retrieve relevant results from a database of another modality. Typical examples of cross-modal retrieval are using text to retrieve relevant images or vice versa.
+
+Even in the unimodal case (image-query-image, etc.), the problem of retrieving similar database items to a query object is a difficult one due to the size of the database and often the dimensionality of the feature space. The K-nearest neighbors (kNN) problem is the classic problem of retrieving the $ k $ database items that are most similar to the query. In many cases, only an approximation to kNN can be given, which is often a good enough solution. Another approach to this problem, hashing for similarity search, has become popular in recent years, beginning with the introduction of Locality Sensitive Hashing (LSH) \cite{lsh}. Initially, LSH methods relied on choosing random hyperplanes to separate the data points, where each hyperplane accounts for one hash bit and the hash bit is determined according to which side of the hyperplane the data point belongs. The main benefit of hashing for similarity is that the curse of dimensionality can be avoided: rather than making costly comparisons among all of the (often continuous-valued) features in the original feature space, examples can be compared in hamming space of a much lower dimensionality. While random LSH methods are called \emph{data-independent} hash methods, recent works have focused on \emph{data-dependent} hash methods which must be learned using either supervised or unsupervised learning algorithms.
+
+The problem of retrieving relevant documents using a query from another modality is even more complicated, and is the focus of this paper. The obvious challenge facing cross-modal retrieval is the question of how to compare two objects that exist in entirely different feature spaces. Cross-modal hashing solutions must determine an effective mapping from each modality to a common hamming space, where objects from either modality can be treated the same. The benefits of hashing for similarity in the cross-modal case are the same as the unimodal case: comparisons can be made much more quickly in a hamming space of lower dimensionality.
+
+Most cross-modal hashing methods generate hash codes by discretizing a continuous output space, most commonly by using the \emph{sign} function to create a code that contains 1's and -1's (or 1's and 0's). Instead, this work is motivated by the ideas introduced in \cite{kai}, called \emph{Linear Subspace Ranking Hashing}. The idea is to learn a unique K-dimensional linear subspace for each hash "bit", such that we may generate a \emph{K}-ary hash code. To determine each hash bit, the original data point is projected onto the corresponding K-dimensional subspace, and the hash bit is set equal to the index of the dimension with the maximum projection. This method is similar to Winner-Take-All (WTA) Hash \cite{wta}, which simply relies upon the original feature dimensions and chooses random permutations of those dimensions for each hash bit.
+
+This paper builds upon the idea of Linear Subspace Ranking Hashing, and extends it to the nonlinear case by using a novel parallel deep neural network architecture in order to learn the subspaces for each hash bit. The architecture includes two parallel pre-trained classifier networks, one for each modality, followed by a hashing segment, and finally a loss segment.
+
+Furthermore, we introduce decorrelation, bit balancing, and quantization techniques to improve the performance of the final model. The decorrelation technique is actually built into the structure of the network itself, by abandoning fully-connected layers in favor of \emph{groups} of fully-connected layers (one group for each hash bit). The bit balancing and quantization techniques are additional terms in the loss function used in the cross-modal learning stage. We evaluate the effectiveness of each technique by using each one in isolation and in combination with the others. We show that these techniques can greatly improve the performance of the deep network, achieving state-of-the-art results on two widely used datasets.
+
+In summary, the major contributions of this paper are as follows:
+\begin{itemize}
+	\item We introduce a novel deep neural network architecture that extends the idea of Linear Subspace Ranking Hashing \cite{kai} to the nonlinear case made possible by deep learning. 
+	\item We introduce novel decorrelation, bit balancing, and quantization schemes that are specifically designed for hashing using subspace ranking, and evaluate the performance gains obtained by using each scheme.
+	\item We demonstrate through several experiments that TODO obtains state-of-the-art performance on two widely used datasets for cross-modal retrieval.
+\end{itemize}
+
+
+\section{Related Work}
+
+The earliest work on cross-modal hashing was Cross-Modal Similarity Sensitive Hashing \cite{cmssh}. CMSSH uses boosting to sequentially learn linear hash functions for each modality, which transform inputs from the different modalities to a common hamming space. Since this pioneering work, cross-modal hashing research has gone in several directions: supervised versus unsupervised hashing, linear versus nonlinear hashing, and ranking-based versus non-ranking-based hash functions.
+
+Most cross-modal hash functions make use of the sign function, or more accurately, a smooth approximation such as the hyperbolic tangent (tanh) function, to obtain each hash bit. By contrast, Linear Subspace Ranking Hashing \cite{kai} was the first method to use ranking-based hash functions for the cross-modal retrieval problem. Taking inspiration from Winner-Take-All (WTA) Hash \cite{wta} and Min-wise Hash \cite{minhash}, LSRH generates K-ary hash bits that correspond to the maximum feature dimension for each feature subspace. Rather than using randomized subspaces in the original feature space like WTA and MinHash, it learns optimal subspaces in a new feature space by using boosting for each linear hash function. To date, LSRH remains the only work of its kind to use ranking-based methods for cross-modal hashing, and it serves as the basis for this work.
+
+Well-known CM hashing methods that do not use neural networks include Semantics-Preserving Hashing (SePH) \cite{seph}, Semantic Correlation Maximization (SCM) \cite{scm}, and Cross-View Hashing (CVH). SePH transforms semantic affinities into a probability distribution that is approximated in hamming space. Nonlinearities are introduced by using kernel logistic regression. SCM achieves impressive scalability and ease of use by (a) avoiding the explicit computation of the semantic similarity matrix and instead approximating it through reconstruction from the hash codes, and (b) eliminating the need for hyperparameters.
+
+Masci et al. \cite{masci} were the first to use parallel neural networks for cross-modal hashing. More recently, Deep Cross-Modal Hashing \cite{dcmh} was the first method to use deep neural networks to learn features and hash codes simultaneously. During training, similar image-text pairs are given the same hash code while just the image feature parameters are learned, and again while just the text feature parameters are learned. Finally, the image and text feature parameters are held constant while the hash codes are learned. These three steps are repeated for a desired number of iterations. Similar to our work, Correlation Hashing Network \cite{chn} pre-trains an image classifier and a text classifier prior to learning the hash codes, both of which become components of the final model. CHN was the first network to consider cosine max-margin loss for deep hashing methods, as well as quantization max-margin loss, which acts as a regularizer. Like DCMH, hash bits are obtained by taking the sign of the network outputs. Collective Deep Quantization \cite {cdq} is the successor to CHN. The main difference is the use of a collective quantization "codebook" that is shared across modalities, which was seen to improve the quantizability of the deep representations and quality of the resulting hash codes.
+
+[TODO: Add more?]
+
+\section{[TODO] Our Method}
+
+\subsection{Notations}
+
+Let $ \mathcal{D}_\mathcal{X} = \X = \{ \xii \}_{i=1}^{N_\mathcal{X}} $ and $ \mathcal{D}_\mathcal{Y} = \Y \text{[TODO]} = \{ \yj \}_{j=1}^{N_\mathcal{Y}} $ be datasets of the image and text modalities, respectively. Then $ \mathcal{D}_\mathcal{X} $ and $ \mathcal{D}_\mathcal{Y} $ consist of $ d_\mathcal{X} $- and $ d_\mathcal{Y} $-dimensional data points, respectively, where each $ \xii $ is a $ d_\mathcal{X} $-dimensional image and each $ \mathbf{y}_i $ is a $ d_\mathcal{Y} $-dimensional text (set of tags). We also define $ \mathbf{S} = \{s_{ij}\} \in \{0,1\}^{N_\mathcal{X} \times N_\mathcal{Y}} $ to be a set of similarity labels, where $ s_{ij} = 1 $ if $ \xii $ is similar to $ \yj $ (by belonging to the same concept), and $ 0 $ otherwise. The goal is to learn two sets of hash functions $ H_* = \{h_*^{(l)}\}_{l=1}^L $, one for each modality, to transform the input images and texts into a common $K-$ary Hamming space, such that similar image-text pairs are hashed to codes that are close together in Hamming space while dissimilar image-text pairs are hashed to codes that are far apart. In this paper, * refers to either modality, $ \mathcal{X} $ or $ \mathcal{Y} $.
+
+In the following sections, $ K $ refers to the number of subspace dimensions we seek to optimize, resulting in a $K$-ary hash code. $ L $ refers to the number of $K$-ary digits in a hash code, while $ L_B = L \times \lceil\log_{2}K\rceil $ is  the number of binary bits used to represent the code. $ N $ refers to the number of examples in question (for example, training instances).
+
+In model architecture discussions, layers are referenced by their label in Fig. \ref{fig:fullnet}. Each layer is denoted by the network segment to which it belongs ($ c $ for classification segment or $ h $ for hashing segment) and a subscript indicating the position of the layer in the segment (a number) and the modality ($ \mathcal{X} $ for image and $ \mathcal{Y} $ for text). For example, layer $ c_{2\mathcal{X}} $ is the second depicted layer of the classification segment for the image modality. Since we omit many hidden layers in the figures, layer $ c_{2\mathcal{Y}} $ is not necessarily the second layer in that segment. When discussing our algorithm specifically, $ \mathbf{W_*} $ refers to the network weights for all layers starting with $ c_{1*} $ and ending with $ h_{1*} $.
+
+\subsection{Linear Subspace Ranking Hashing}
+
+Rather than relying upon \emph{sign} or other thresholding functions to determine the bits of a hash code, Linear Subspace Ranking Hashing \cite{kai} proposed a new family of hash functions that exploits feature ranking and max-order statistics to generate a hash code that is scale-invariant and robust against noise. Li et al. \cite{kai} defines the ranking hash function as in (\ref{eq:hfun}):
+
+\begin{equation}
+\label{eq:hfun}
+h_*^l(\mathbf{z}_*; \mathbf{W}_*^l) = \argmax\limits_{1 \leq k \leq K} [\mathbf{w}_{*k}^l]^T \mathbf{z}_*,
+\end{equation}
+
+\noindent where $ \mathbf{z_*} \in \mathcal{D}_* $, while $ \mathbf{W}_*^l = [\mathbf{w}_{*1}^l, \mathbf{w}_{*2}^l, ..., \mathbf{w}_{*K}^l]^T \in R^{K \times d_*} $ so that $ \mathbf{w}_{*k}^l $ refers to the learned parameters that define the $k$-th latent subspace dimension. In (\ref{eq:hfun}), $ h_*^l $ is a hash function for just one bit; thus an entire hash code is given by $ [h_*^1, h_*^2, ..., h_*^L] $. In simple terms, one hash bit is given by the index of the dimension with the highest projected feature value.
+
+As given in \cite{kai}, (\ref{eq:hfun}) can be reformulated to the vectorized form in (\ref{eq:hfunvec}):
+
+\begin{equation}
+\label{eq:hfunvec}
+\begin{gathered}
+h(\mathbf{z}; \mathbf{W}) = \argmax\limits_{\mathbf{g}} \mathbf{g}^T \mathbf{Wz}, \\
+\text{s.t.} \enspace \mathbf{g} \in \{0,1\}^K, \mathbf{1}^T\mathbf{g} = 1
+\end{gathered}
+\end{equation}
+
+In order to optimize the parameters $ \mathbf{W} $, \cite{kai} proposes to use the softmax function as a continuous probabilistic approximation for the argmax term. Thus for the training phase, the hash function is approximated by (\ref{eq:hfunsoft}), where $ \sigma $ denotes the softmax activation function. During retrieval, which requires computation of the Hamming distance between two codes, (\ref{eq:hfun}) is still utilized.
+
+\begin{equation}
+\label{eq:hfunsoft}
+h(\mathbf{z}; \mathbf{W}) \approx \sigma(\mathbf{Wz})
+\end{equation}
+
+Although \cite{kai} showed significant improvements over traditional non-ranking hashing methods, the use of strictly linear subspaces prevents the optimality that may be achieved by exploiting the nonlinearities of deep neural networks. Additionally, while \cite{kai} is restricted to learning one hash code bit function at a time using Adaboost, our proposed method is able to learn all bits simultaneously. In general, this can reduce training time while additionally eliminating the dependence of later hash functions on previously learned hash functions.
+
+\begin{figure*}
+	\centering
+	\includegraphics[width=1\textwidth]{FullNet.png}
+	\caption{\label{fig:fullnet}Full Network structure for deep cross-modal hashing. Inputs to the network are given by the large arrows. The network consists of three segments: the classification segment, the hashing segment, and the loss segment.}
+\end{figure*}
+
+\subsection{[TODO] Overview}
+
+[TODO] extends \cite{kai} by integrating subspace ranking hashing into an end-to-end, hierarchical deep neural network framework. In addition, we propose adaptations to classical hashing techniques including bit decorrelation, bit balancing, and quantization.
+
+Our model consists of two independently trained classifier networks, one for each modality, each augmented by a hashing segment and connected by a cross-modal loss segment. There are actually two stages of training: the first is the training of the independent classifier networks, and the second is the cross-modal similarity training. A depiction of the full network during the cross-modal training stage is given in Fig. \ref{fig:fullnet}. In the figure, image-text pairs are shown being fed into the network along with a similarity label (inputs given by orange arrows). A detailed explanation of each segment of the network is given in the following sections. 
+
+\subsection{Classification Segment}
+
+The classification segment is constructed by training two independent classifier networks, one for each data modality. The structure of the image classifier is an AlexNet \cite{alexnet} convolutional neural network (CNN). The text classifier is a deep neural network with 3 hidden layers, each of size 2048. A rectifying linear unit (ReLU) and dropout are employed after each hidden layer. The dimensionality of the final layer of the classifiers (not depicted in Fig. \ref{fig:fullnet}) is dependent on the dataset. For the MIRFLICKR \cite{flickr} dataset, images and text belong to one or more of 24 class labels; thus, the final layer would consist of 24 output neurons, each giving the probability of the input text or image belonging to the corresponding class.
+
+Each classifier is trained on a large dataset of the corresponding modality (see Part [TODO] for details). Once each classifier has been trained, we effectively remove the output layer of the classifiers, resulting in the classification segment shown in Fig. \ref{fig:fullnet}. The final layer of the classification segment, layer $ c_{2*} $, is then connected to the hashing segment, described in the next section.
+
+This form of hierarchical feature learning has become popular in recent years \cite{dvsh,dcmh,autoen,chn,cdq} due to its ability to reduce the complexity of a difficult learning task into smaller, manageable parts. Pretraining the classification segment ensures that the hashing network is able to interpret instances from the individual modalities before deciding how to unify their representation in a common hamming space.
+
+\subsection{Hashing Segment / Decorrelation Component}
+
+Simply put, the hashing segment's purpose is to determine the hash value of the input image/text. As in \cite{kai}, it does this by learning $ L $ distinct $ K $-dimensional subspaces, where $ L $ is the length of the $ K $-ary hash code to be determined. Thus the output of the hashing segment is effectively the projection of the input/text onto each of the $ L $ latent subspaces.
+
+Fig. \ref{fig:hashseg} shows that the layers in the hashing segment can be grouped into $ L $ groups of $ K $ neurons, where each group corresponds to one subspace being learned and thus one hash bit. (In Fig. \ref{fig:fullnet} we only show 2 such groups to conserve space). For each of the $ L $ groups of neurons, we use the softmax function to transform the outputs such that for each group, the sum of the outputs in that group is 1.
+
+
+\begin{figure}
+	\centering
+	\includegraphics[width=0.45\textwidth]{HashSeg.png}
+	\caption{\label{fig:hashseg}Detailed diagram of the hashing segment. Note that one bit of the hash code is found by taking the index of the maximum output in the corresponding group of $ k $ neurons. Colors are given to emphasize the value of each output relative to that of the other outputs in each group.}
+\end{figure}
+
+
+In order to obtain the hash value of the input image/text, each group of neurons reports the index of the neuron with the maximum output. Fig. \ref{fig:hashseg} shows an example, where the first two bits of the code are \{2 1\}.
+
+The connections between the classification segment and the hashing segment are shown in Fig. \ref{fig:fullnet}. The connections are created by dividing the neurons in layer $ c_{2*} $ into $ L $ equally-sized groups, and then fully connecting each of these groups with the corresponding group in layer $ h_{1*} $. The intuition behind creating the connections in this way (as opposed to fully connecting $ c_{2*} $ and $ h_{1*} $) is that each hash bit should contain information that is independent from the other hash bits. Thus this design trait is in fact the decorrelation component of the network, since it ensures that there is very little information redundancy between hash bits.
+
+\subsection{Objective Function}
+
+The overall objective function is given in (\ref{eq:obj}):
+
+\begin{equation}
+\label{eq:obj}
+\begin{gathered}
+\mathcal{J}(\X,\Y; \WX, \WY) = \alpha\mathcal{S}(\X,\Y; \WX, \WY) + \\
+\lambda\mathcal{B}(\X,\Y; \WX, \WY) + 
+\gamma\mathcal{Q}(\X,\Y; \WX, \WY),
+\end{gathered}
+\end{equation}
+
+\noindent where $ \mathcal{S} $ is the similarity constraint, $ \mathcal{B} $ is the bit balancer constraint, $ \mathcal{Q} $ is the quantization constraint, and $ \alpha, \lambda, $ and $ \gamma $ are weighting coefficients. Each constraint can be optimized simultaneously using stochastic gradient descent, and each is explained in detail in the following subsections.
+
+\subsection{Bit Balancer}
+
+Since most hashing algorithms deal with binary hash codes, they need only to balance the occurrence of 1's and 0's (or 1's and -1's) in the hash code. Thus one can achieve balance simply by minimizing (\ref{eq:binBal}), where $ \mathbf{B}_{\{1,-1\}} \in \{-1,1\}^{L \times N} $ is the matrix of binary codes and $ \mathbf{1} $ is is a vector of 1's of size $ N $.
+
+\begin{equation}
+\label{eq:binBal}
+\big| \mathbf{B}_{\{1,-1\}} \cdot \mathbf{1} \big|
+\end{equation}
+
+Binary codes are actually a special case for our algorithm, which must attempt to balance the occurrence of all $ \{0,1,.., K-1\} $ in a $K$-ary hash code. Then, for each bit position $ l \in \{1,2,..L\} $ in the hash code, we would like each $ d \in \{0,1,.., K-1\} $ to occur roughly $ N / K $ times across the $ N $ instances. We can approximate this by minimizing (\ref{eq:karyBal}): 
+
+\begin{equation}
+\label{eq:karyBal}
+\begin{gathered}
+\mathcal{B}(\X,\Y; \WX, \WY) = \\
+\Big|\Big| \bpx \cdot \mathbf{1} - \frac{N}{K} \cdot \mathbf{1'} \Big|\Big|_F^2 + \Big|\Big| \bpy \cdot \mathbf{1} - \frac{N}{K} \cdot \mathbf{1'} \Big|\Big|_F^2,
+\end{gathered}
+\end{equation}
+
+\noindent where $ \bps \in [0,1]^{LK \times N} $ is the output of the final hashing layer $ h_{2*} $ for all instances. Thus, $ \bpx = \sigma(\WX^T\X) $ and $ \bpy = \sigma(\WY^T\Y) $. Finally, $ \mathbf{1} $ is a vector of 1's of size $ N $, and $ \mathbf{1}' $ is a vector of 1's of size $ LK $. For further explanation, let $ \mathbf{C} = \mathbf{B'_\mathcal{*}} \cdot \mathbf{1} \in \mathbb{R}^{LK \times 1} \geq 0 $. Then $ \mathbf{C}_i $ approximately counts the number of occurrences of the $K$-ary digit $ d = i \mod K $ in bit position $ l = i / L $ across all $ N $ instances. This approximation becomes an exact count when all entries of $ \bps $ are exactly 0 or 1, which is desired.
+
+\subsection{Quantization}
+
+For binary hash functions, quantization loss terms aim to achieve a maximum margin between instances classified on either side of the threshold value. Given the hash function $ h(\X; \WX) = \sign(\WX^T\X) $, we want $ \WX^T\X $ to be far from 0 to minimize the risk of similar instances being on either side of the threshold value and obtaining different hash codes. While earlier quantization algorithms such as \cite{itq,acq} used an alternating iterative optimization procedure, \cite{qch} was the first cross-modal hashing algorithm to perform simultaneous quantization and similarity-preserving optimization. The quantization loss for the binary case is introduced in \cite{itq} and takes the following form for two modalities:
+
+\begin{equation}
+\label{eq:binaryQuant}
+\left|\left| \mathbf{B}_\mathcal{X} - \WX^T\X \right|\right|^2_F + \left|\left| \mathbf{B}_\mathcal{Y} - \WY^T\Y \right|\right|^2_F
+\end{equation}
+
+In order to adapt this equation for the k-ary case to suit our method, notice that each group of $ K $ outputs in layer $ h_{2*} $ sums to exactly 1. To achieve perfect quantization, one output should be exactly 1, and the rest should be 0. Thus we propose to use the following equation to achieve quantization for the k-ary case:
+
+\begin{equation}
+\label{eq:karyQuant}
+\begin{gathered}
+\mathcal{Q}(\X,\Y; \WX, \WY) = \\
+\Big|\Big| \big| \bpx - 0.5 \cdot\mathbf{E}\big| - 0.5 \cdot \mathbf{E} \Big|\Big|_1 + \\
+\Big|\Big| \big| \bpy' - 0.5 \cdot\mathbf{E}\big| - 0.5 \cdot \mathbf{E} \Big|\Big|_1 \\
+\Big|\Big| \abs\big( \bpx' - 0.5 \cdot\mathbf{E}\big) - 0.5 \cdot \mathbf{E} \Big|\Big|_1 + \\
+\Big|\Big| \abs\big( \bpy' - 0.5 \cdot\mathbf{E}\big) - 0.5 \cdot \mathbf{E} \Big|\Big|_1 + \\
+\trace\Big(\mathbf{E} \cdot \Big[ \big| \bpx - 0.5 \cdot\mathbf{E}\big| - 0.5 \cdot \mathbf{E} \Big] \Big) + \\
+\trace\Big(\mathbf{E} \cdot \Big[ \big| \bpy - 0.5 \cdot\mathbf{E}\big| - 0.5 \cdot \mathbf{E} \Big] \Big), \\
+\big|\big| \bpx \circ \big(\mathbf{E} - \bpx \big) \big|\big|_F^2 + \big|\big| \bpy \circ \big(\mathbf{E} - \bpy \big) \big|\big|_F^2
+\end{gathered}
+\end{equation}
+
+\noindent where $ \bpx = \sigma(\WX^T\X) $ and $ \bpy = \sigma(\WY^T\Y) $, as in (\ref{eq:karyBal}); and $ \mathbf{E} $ is an $ LK \times N $ matrix of 1's. (\ref{eq:karyQuant}) simply takes the sum of the "closeness" to 0.5 for all elements of $ \bpx $ and $ \bpy $. Thus, $ \mathcal{Q} $ is minimized when all of the outputs of $ h_{2*} $ are 0 or 1.
+
+\subsection{Similarity Constraint}
+
+The similarity constraint ensures that hash codes for similar image-text pairs are close together in Hamming space while hash codes for dissimilar image-text pairs are far apart. (\ref{eq:singlePairLoss}) shows the loss contribution for a single image-text pair.
+
+\begin{equation}
+\label{eq:singlePairLoss}
+l(\xii,\yj) = \big( \htwoxv^T \htwoyv - s_{ij}L \big)^2
+\end{equation}
+
+In (\ref{eq:singlePairLoss}), $ \vec{\mathbf{h_{2*}}} $ refers to the vector of output values from the neurons in layer $ h_{2*} $. It is easy to see from Equation \ref{eq:singlePairLoss} that the result of the subtraction operation in the loss function is bounded by $ [O, L] $. To see this, note that (a) due to the use of the softmax function, $ \htwoxv^T \htwoyv $ is bounded by $ [\text{0}, L] $; and (b) $ s_{ij}L $ is always 0 or $ L $.
+
+\begin{comment}
+In (\ref{eq:singlePairLoss}), $ L $ is the number of bits in the hash code, and $ \vec{\mathbf{h_{2*}}} $ refers to the vector of output values from the neurons in layer $ h_{2*} $. $ s_{ij} $ refers to the similarity between image $ \xii $ and text $ \yj $, and is given in (\ref{eq:sij}):
+
+\begin{equation}
+\label{eq:sij}
+s_{ij} = 
+ \begin{cases} 
+      1, & \xii~ \text{and}~ \yj~ \text{are similar} \\
+      0, & \xii~ \text{and}~ \yj~ \text{are not similar}
+   \end{cases}
+\end{equation}
+
+An image-text pair is said to be similar if they share at least one common concept, i.e. class label. If the image and text do not have any common class labels, the pair is said to be dissimilar. It is easy to see from Equation \ref{eq:singlePairLoss} that the result of the subtraction operation in the loss function is bounded by $ [O, L] $. To see this, note that (a) due to the use of the softmax function, $ \htwoxv^T \htwoyv $ is bounded by $ [O, L] $; and (b) $ s_{ij}L $ is always 0 or $ L $.
+\end{comment}
+
+We can interpret the loss function as follows. If the image-text pair are similar, we would like the result of $ \htwoxv^T \htwoyv $ to be very close to $ L $. For this to occur, each group of $ K $ neurons in either layer will contain one output of approximately "1" and $ K - 1 $ outputs of approximately "0". (See Fig. \ref{fig:hashseg} for an illustration). Furthermore, the outputs of the neurons in $ h_{2\mathcal{X}} $ and $ h_{2\mathcal{Y}} $ must be very similar (i.e. the positions of the "1" values in $ \htwoxv $ must be the same as those of $ \htwoyv ) $. On the other hand, if the image-text pair are dissimilar, we would like the result of $ \htwoxv^T \htwoyv $ to be very close to 0, indicating a difference in the indices of the maximum outputs for each group. Ultimately, this criterion accomplishes the goal of pushing the hash codes for similar image-text pairs close together, and pulling the hash codes of of dissimilar image-text pairs far apart. 
+
+The overall similarity constraint $ \mathcal{S} $ is given in (\ref{eq:simConst}):
+
+\begin{equation}
+\label{eq:simConst}
+\mathcal{S}(\X,\Y; \WX, \WY) = \big|\big| \bpx^T \bpy - L \cdot \mathbf{S} \big|\big|_F^2,
+\end{equation}
+
+\noindent where $ \mathbf{S} \in \{0,1\}^{N \times N} $ is the similarity matrix with $ s_{ij} $ defined as before, and again $ \bpx = \sigma(\WX^T\X) $ and $ \bpy = \sigma(\WY^T\Y) $. In fact, the $ (i,j)^{th} $ element of $ \bpx^T \bpy $ is simply the result of $ \htwoxv^T \htwoyv $ for input image $ \xii $ and text $ \yj $.
+
+\subsection{Training the Network}
+
+Training consists of two stages: classifier pre-training, and cross-modal training. For the image classifier, we use a replica of AlexNet that has been pretrained by The Berkeley Vision and Learning Center \footnotemark  on the ImageNet \cite{imagenet} dataset using Caffe \cite{caffe}, and fine-tune the weights for each of the experimental datasets. The text classifier weights are randomly initialized and trained only on each of the experimental datasets.
+\footnotetext{[TODO] Pretrained model available for download and unrestricted use from https://github.com/BVLC/caffe/tree/master/models/bvlc\textunderscore alexnet}
+
+In the cross-modal training stage, the weights learned during the classifier pre-training stage are kept relatively constant by setting a low learning rate of 10\textsuperscript{-6} to all of the weights in the classification segment. By setting a much higher learning rate for the weights in the hashing segment (beginning with .05 and tapering off as training progresses), the network learns how to incorporate the knowledge from the individual classifiers in order to create a common hamming space for the two modalities.
+
+With a well-defined loss function, the cross-modal training stage is accomplished by feeding image-text pairs into the network, along with a similarity indicator (1 or 0). In this work, we use the standard stochastic gradient descent (SGD)  method to optimize the weights for our model. All models are trained using a momentum coefficient of 0.9 without weight decay. We use a batch size of 200 training pairs during training, where 50 pairs are similar pairs and 150 pairs are dissimilar pairs.
+
+\section{Experiments}
+
+The hashing network is implemented using the Torch scientific computing framework \cite{torch}. Torch is built on top of LuaJIT and offers excellent support for GPU's through its CUDA implementation. Please note that int the following sub-sections, the words \emph{label} (or \emph{class label}) and \emph{concept} are interchangeable. Also, note that we will now refrain from the use of term \emph{image-text pair} and use two new terms for clarification. First, an \emph{image-text couplet} specifically refers to an image from the database and its associated textual tags. On the other hand, a \emph{training pair} refers to a image and a set of tags that are not necessarily associated. 
+
+\subsection{MIRFLICKR dataset}
+
+The MIRFLICKR-25000 dataset \cite{flickr} consists of 25,000 image-text couplets downloaded from Flickr, a social photography website. Each couplet is annotated with one or more of 24 semantic labels, providing the ground truth for classification and similarity between items in the dataset. In our experiments, we resize the images to 3 x 227 x 227 pixels. Each set of tags is represented by a 1,075-D bag-of-words vector, representing the 1,075 most common tags across the dataset.
+
+First, we remove all tags that occur less than 20 times in the dataset. Then, images that do not have associated tags or class labels are removed. The result is 18,159 image-text couplets. Following the experimental setup in \cite{cdq,chn}, we randomly select 1,000 image-text couplets (approximately 5\% of the dataset) to be the query set, 1,000 couplets to be the validation set, and 4,000 couplets to be the training set.
+
+\subsection{NUS-WIDE dataset}
+
+The NUS-WIDE dataset \cite{nuswide} consists of 269,648 Flickr images and their associated tags. Each of these is annotated with one or more of 81 ground truth concepts. Following [TODO], we use the 195,834 image-text couplets that belong to the 21 largest concepts. Images are resized to 3 x 227 x 227 pixes, while tags are represented by a 1,000 bag-of-words vector that corresponds to the 1,000 most frequent tags. Following the experimental setup in \cite{cdq,chn}, we randomly select 500 couplets per concept to be included in the training set, 100 couplets per concept for the query set, and 50 couplets per concept for the validation set. Duplicates are avoided by ensuring that a couplets is not selected more than once. 
+
+\subsection{Experimental Setup}
+
+For the single-modality classifier pre-training phase, all images/texts except those that exist in the query set or validation set are used for training. During the cross-modal training phase, the \emph{training pairs} are actually any combination of an image and a text that exist in the training set. Thus, for the MIRFLICKR dataset, all combinations of the 4,000 image-text couplets result in 4,000 x 4,000 = 16 million possible cross-modal training pairs. However, we restrict the number of allowed training pairs by only allowing training pairs that are dissimilar, as well as training pairs that pass a similarity threshold. The reason for this is that training pairs that only share one semantic label will be much less helpful to the network in teaching it how to identify similarities between an image and a text than pairs that pass the similarity threshold.
+
+The similarity threshold is defined by the following equation:
+
+\begin{equation}
+\label{eq:simthresh}
+\tau = \frac{C_i^T C_j}{0.5 * (sum(C_i) + sum(C_j)) }
+\end{equation}
+
+where $ C_i $ and $ C_j $ are the binary (ground truth) class label vectors for image $ \xii $ and text $ \yj $ respectfully, and $ sum(C_i) $ is the number of classes to which example $ \xii $ belongs. Thus (\ref{eq:simthresh}) is a measure of how many class labels $ \xii $ and $ \yj $ have in common, divided by a function of the total number of classes to which each one belongs. Higher values of $ \tau $ then mean that $ \xii $ and $ \yj $ share a large fraction of the classes to which they belong.
+
+The cross-modal training is accomplished by feeding both similar and dissimilar pairs into the network for each batch. Once the training is complete, the model is evaluated as per the following section.
+
+\begin{figure*}[]
+	
+	\begin{subfigure}{0.24\textwidth}
+		\includegraphics[width=4.0cm, height=3.5cm]{baselines.png}
+		\caption{[TODO]}
+	\end{subfigure}
+	\begin{subfigure}{0.24\textwidth}
+		\includegraphics[width=4.0cm, height=3.5cm]{baselines.png}
+		%\includegraphics[width=4.4cm, height=3.5cm]{baselines.png}
+		\caption{[TODO]}
+	\end{subfigure}
+	\begin{subfigure}{0.24\textwidth}
+		\includegraphics[width=4.0cm, height=3.5cm]{baselines.png}
+		%\includegraphics[width=4.4cm, height=3.5cm]{baselines.png}
+		\caption{[TODO]}
+	\end{subfigure}
+	\begin{subfigure}{0.24\textwidth}
+		\includegraphics[width=4.0cm, height=3.5cm]{baselines.png}
+		%\includegraphics[width=4.4cm, height=3.5cm]{baselines.png}
+		\caption{[TODO]}
+	\end{subfigure}
+	\caption{\label{fig:precrec}Precision-recall curves}
+\end{figure*}
+
+\subsection{Evaluation}
+
+In this paper, we compare the performance of our model against other works by comparing the mean average precision of retrieved examples. The retrieval task is divided into two categories: image-query-text and text-query-image. The image-query-text retrieval task begins by obtaining the hash codes for the query images and the database texts. We then use each of the query hash codes to query the database for the top-k related texts (these are the $ k $ texts whose hash values are closest to the query hash code in hamming space.) The text-query-image task is the reverse of image-query-text: we use the query texts in order to retrieve relevant database images.
+
+Mean average precision (mAP) is calculated as follows:
+
+\begin{equation}
+\label{eq:map}
+mAP = \frac{1}{Q} \sum_{q=1}^Q \frac{\sum_{k=1}^K Pr(k)\delta(q,k)}{\sum_{k=1}^K\delta(q,k)} 
+\end{equation}
+
+where $ Q $ is the number of query items, $ K $ is the number of examples retrieved from the database, $ Pr(k) $ is the top-k precision at the $ k^{th} $ element, and $ \delta(q,k) $ is 1 if the $ k^{th} $ returned item is similar to the $ q^{th} $ query item and 0 otherwise.
+
+It is important to note that every experiment in this paper is run 5 times so that each reported result is the average across the 5 runs.
+
+\begin{table*}[h!]
+	\centering
+	\caption{Mean average precision at top 50 (mAP@50) results for our method versus baseline methods. The best results are shown in bold. The bit lengths given refer to the number of binary bits in the hash code $ L_B $.}
+	\label{tab:results}
+	\resizebox{2.1\columnwidth}{!}{%
+\begin{tabular}{|c|ccc|ccc||ccc|ccc|}
+	\hline 
+	& \multicolumn{6}{c||}{\textbf{MIRFlickr}} & \multicolumn{6}{c|}{\textbf{NUSWIDE}}  \\ 
+	\cline{2-7}\cline{8-13} 
+	& \multicolumn{3}{c|}{Text query Image} & \multicolumn{3}{c||}{Image query Text}  & \multicolumn{3}{c|}{Text query Image}  & \multicolumn{3}{c|}{Image query Text}   \\ 
+	\cline{2-13} 
+	\textbf{Method} & 16 bits & 32 bits & 64 bits & 16 bits & 32 bits & 64 bits & 16 bits & 32 bits & 64 bits & 16 bits & 32 bits & 64 bits  \\ 
+	\hline\hline
+	CVH & 0.0001 & 0.0051  & 0.0051  & 0.0051 & 0.0051  & 0.0051  & 0.0051 & 0.0051  & 0.0051  & 0.0051 & 0.0051  & 0.0051  \\ 
+	\hline 
+	LSSH & 0.0002 & 0.0051  & 0.0051  & 0.0051 & 0.0051  & 0.0051  & 0.0051 & 0.0051  & 0.0051  & 0.0051 & 0.0051  & 0.0051  \\ 
+	\hline 
+	LSRH & 0.0003 & 0.0051  & 0.0051  & 0.0051 & 0.0051  & 0.0051  & 0.0051 & 0.0051  & 0.0051  & 0.0051 & 0.0051  & 0.0051  \\ 
+	\hline 
+	CDQ & 0.8477 & 0.8495  & N/A  & 0.8635 & 0.8618  & N/A  & 0.8321 & 0.8478  & N/A  & 0.8495 & 0.8492  & N/A  \\ 
+	\hline 
+	OUR & 0.0005 & 0.0051  & 0.0051  & 0.0051 & 0.0051  & 0.0051  & 0.0051 & 0.0051  & 0.0051  & 0.0051 & 0.0051  & 0.0051  \\ 
+	\hline 
+\end{tabular}
+}
+\end{table*}
+
+\subsection{Comparison with Baselines}
+
+Fig. \ref{fig:precrec} shows the precision-recall curves for our method compared to nine baseline methods: LSRH \cite{kai}, SePH \cite{seph}, QCH \cite{qch}, STMH \cite{stmh}, LSSH \cite{lssh}, SCM \cite{scm}, CMFH \cite{cmfh}, IMH \cite{imh}, and CVH \cite{cvh}. [TODO]
+
+Table \ref{tab:results} shows the mean average precision obtained at the top 50 results (mAP@50) for our method as well as several baseline methods [TODO]. 
+
+\subsection{Effect of Decorrelation, Quantization and Bit Balance}
+
+In order to evaluate the effectiveness of the decorrelation, quantization, and bit balance features of our method, we ran several experiments in which each feature was turned "on" or "off". To turn the bit balance or quantization features "off", we simply set $ \lambda $ or $ \gamma $ respectively in (\ref{eq:obj}) to 0. To turn the decorrelation component "off", we actually modify the neural network architecture such that $ c_{2*} $ and $ h_{1*} $ in Fig. \ref{fig:fullnet} are fully connected.
+
+The results of this experiment are shown in Fig. \ref{fig:BQ2}. The legend indicates which features have been turned "on", where D = decorrelation, B = bit balance, and Q = quantization. [TODO]
+
+\begin{figure}
+	
+	\begin{subfigure}{\columnwidth}
+		\includegraphics[width=7.5cm, height=5cm]{BQ.png}
+		\caption{MIRFLICKR}
+	\end{subfigure}
+	\begin{subfigure}{\columnwidth}
+		\includegraphics[width=7.5cm, height=5cm]{BQ.png}
+		\caption{NUS-WIDE}
+	\end{subfigure}
+	\caption{\label{fig:BQ}[TODO]}
+	
+\end{figure}
+
+\begin{figure}
+	
+	\begin{subfigure}{\columnwidth}
+		\centering
+		\includegraphics[width=7.5cm, height=.6cm]{legend.png}
+	\end{subfigure}	
+	\begin{subfigure}{0.5\columnwidth}
+		\includegraphics[width=4cm, height=3.5cm]{BQ2.png}
+		\caption{MIRFLICKR}
+	\end{subfigure}
+	\begin{subfigure}{0.5\columnwidth}
+		\includegraphics[width=4cm, height=3.5cm]{BQ2.png}
+		\caption{NUS-WIDE}
+	\end{subfigure}
+	\caption{\label{fig:BQ2}[TODO]}
+	
+\end{figure}
+
+\subsection{Subspace Dimension}
+
+Fig. \ref{fig:K} shows the effect of changing the subspace dimension $ K $. With a higher value of $ K $, each $K$-ary digit in the hash code holds more information, but this comes at a cost of more bits per digit. To truly evaluate the optimal value of $ K $ for each dataset, this experiment was run by keeping the bit length of the hash code set at $ L_B = 60 $, resulting in $ L = 60 / \log_2K $. [TODO]
+
+\begin{figure}
+
+	\begin{subfigure}{0.45\columnwidth}
+		\includegraphics[width=4cm, height=3.5cm]{LK.png}
+		\caption{MIRFLICKR}
+	\end{subfigure}
+	\begin{subfigure}{0.45\columnwidth}
+		\includegraphics[width=4cm, height=3.5cm]{LK.png}
+		\caption{NUS-WIDE}
+	\end{subfigure}
+	\caption{\label{fig:K}Mean average precision observed by altering the subspace dimension $ K $, while keeping the bit length of the hash code fixed at $ L_B = 60 $. Image-query-text ($ \text{I} \rightarrow \text{T} $) and text-query-image ($ \text{T} \rightarrow \text{I} $) results are shown for both MIRFLICKR (a) and NUS-WIDE (b).}
+
+\end{figure}
+
+\section{Conclusion and Future Work}
+
+In this paper, we introduced a novel cross-modal hashing architecture using deep neural networks and a ranking-based hashing method. By exploiting the discriminative knowledge of the pre-trained unimodal classifiers and using this to drive the learning of new feature subspaces for our feature-ranking hash function, we have shown improvements over the current state-of-the-art in our preliminary results. These results are consistent with the conclusions of \cite{kai}, which proposed to use feature-ranking methods for cross-modal hashing on the basis that ranking methods are robust to variations in the actual feature values. In this paper, we proposed to replace the standard fully-connected structure between the classification and hashing segment in favor of a grouped approach that gives each group independent responsibility for one bit of the hash code, although the results of this method have not yet been evaluated. This will be the next step in the ongoing research process associated with this work, and we hope to show even greater performance improvements over state-of-the-art cross-modal hashing methods.
+
+\bibliography{bibb}
+\bibliographystyle{aaai}
+\end{document}
+
+\end{document}
